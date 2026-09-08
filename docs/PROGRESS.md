@@ -492,3 +492,63 @@ M4 — observation normalisation with running mean/std saved alongside checkpoin
 actor-critic network (tanh MLP, Gaussian policy with a state-independent log-std), and
 checkpoint save/load. Then M5 puts PPO on top of it and finds out whether the humanoid can
 learn to stand.
+
+---
+
+## M4 — normalisation, policy, checkpoints
+
+**Status:** done (2026-09-08)
+
+### Implemented
+
+- **`python/rl/normalization.py`** — `RunningMeanStd` (Chan's parallel algorithm),
+  `ObservationNormalizer` with clipping and a freeze switch, and `ReturnNormalizer`.
+- **`python/rl/policy.py`** — `ActorCritic` with separate actor and critic trunks, tanh
+  activations, a tanh-bounded action mean and a learned state-independent log-std; plus
+  checkpoint save/load.
+
+### Decisions worth stating
+
+**Separate actor and critic trunks.** A shared trunk saves parameters, but the value loss is
+typically an order of magnitude larger than the policy loss and dominates the shared layers'
+gradients. The symptom is a policy that stops improving while the value loss keeps falling.
+A test asserts the parameter sets are disjoint.
+
+**State-independent log-std.** Letting the network emit the spread invites collapsing it to
+nothing on whatever states look good early, after which exploration never recovers. It is
+clamped to [-3, 1] as well: a collapsed std makes the PPO ratio explode.
+
+**Small output-layer gain (0.01).** Combined with the rest-pose-centred action mapping from
+M3, an untrained policy starts by standing rather than by folding itself up. A test asserts
+the initial mean action is under 0.1 in magnitude.
+
+**The normaliser travels inside the checkpoint.** A policy restored without its observation
+statistics sees a completely different input distribution and behaves like an untrained
+network — a failure that looks like the training run was worthless. Saving them together makes
+that impossible, and a mismatched-dimension load is refused rather than silently reinterpreted.
+
+**Returns are scaled, never shifted.** Subtracting a constant from every reward changes the
+optimal policy whenever episode lengths vary, and surviving longer is the entire task here.
+Only the scale is divided out.
+
+### Tested
+
+**22 Python cases.** Running statistics are checked against numpy over the whole stream with
+uneven batches; log-probabilities from `act` and `evaluate_actions` are asserted identical
+(if they disagree, the PPO ratio starts away from 1 and every update is wrong in a way that
+still trains); gradients are checked to reach every parameter including `log_std`; checkpoints
+round-trip weights, statistics, optimiser state and provenance.
+
+### Problem found by a test
+
+`RunningMeanStd` originally merged the first batch into a `(mean 0, var 1)` pseudo-count prior,
+which is what most reference implementations do. That is not harmless. The parallel-variance
+update carries a `delta² · (n_a·n_b/total)` term, and when the data sits far from zero that
+delta is the full offset. A stream centred on 1e6 with a spread of 1e-2 reported a variance of
+about **250** instead of 1e-4 — every observation would then have been scaled to nothing. The
+first batch now defines the statistics outright, and the test asserts the variance is under 1.0
+rather than merely close to the right value, so the failure mode cannot creep back.
+
+### Next
+
+M5 — PPO on top of this, and finding out whether the humanoid learns to stand.

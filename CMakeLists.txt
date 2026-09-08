@@ -44,20 +44,58 @@ find_package(OpenGL REQUIRED)
 
 # ---------------------------------------------------------------- core
 add_library(aibf_core STATIC
+  cpp/core/Json.cpp
+  cpp/core/Png.cpp
   cpp/core/Test.cpp
 )
 target_include_directories(aibf_core PUBLIC ${CMAKE_SOURCE_DIR}/cpp)
 target_link_libraries(aibf_core PUBLIC aibf_flags)
 
+# ---------------------------------------------------------------- physics
+add_library(aibf_physics STATIC
+  cpp/physics/Collision2D.cpp
+  cpp/physics/Joint2D.cpp
+  cpp/physics/World2D.cpp
+)
+target_link_libraries(aibf_physics PUBLIC aibf_core)
+
+# ---------------------------------------------------------------- humanoid
+add_library(aibf_humanoid STATIC
+  cpp/humanoid/HumanoidConfig.cpp
+  cpp/humanoid/Humanoid2D.cpp
+)
+target_link_libraries(aibf_humanoid PUBLIC aibf_physics)
+
+# ---------------------------------------------------------------- executables
+# ---------------------------------------------------------------- rendering
+# Kept separate from the simulation libraries so headless training never links
+# against GLFW or OpenGL at all.
+add_library(aibf_engine STATIC
+  cpp/engine/GL.cpp
+  cpp/engine/Window.cpp
+  cpp/engine/Renderer2D.cpp
+  cpp/engine/DebugDraw.cpp
+)
+target_link_libraries(aibf_engine PUBLIC aibf_humanoid glfw OpenGL::GL)
+
 # ---------------------------------------------------------------- executables
 add_executable(aibackflip cpp/main.cpp)
-target_link_libraries(aibackflip PRIVATE aibf_core glfw OpenGL::GL)
+target_link_libraries(aibackflip PRIVATE aibf_engine)
+
+# Reports measurements rather than assertions; links no rendering.
+add_executable(aibf_diag cpp/tools/diagnostics.cpp)
+target_link_libraries(aibf_diag PRIVATE aibf_humanoid)
 
 add_executable(aibf_tests
   cpp/tests_main.cpp
   cpp/tests/test_math.cpp
+  cpp/tests/test_json.cpp
+  cpp/tests/test_collision.cpp
+  cpp/tests/test_physics.cpp
+  cpp/tests/test_joints.cpp
+  cpp/tests/test_humanoid.cpp
 )
-target_link_libraries(aibf_tests PRIVATE aibf_core)
+target_link_libraries(aibf_tests PRIVATE aibf_humanoid)
 
 enable_testing()
 add_test(NAME cpp_unit COMMAND aibf_tests)

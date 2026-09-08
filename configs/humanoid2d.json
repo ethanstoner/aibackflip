@@ -1,0 +1,269 @@
+{
+  "collision_group": 1,
+  "joints": [
+    {
+      "child": "chest",
+      "kd": 400,
+      "kp": 4000,
+      "lower_limit": -0.8,
+      "max_torque": 400,
+      "name": "waist",
+      "parent": "pelvis",
+      "rest_anchor": [0, 1.08],
+      "upper_limit": 0.6
+    },
+    {
+      "child": "head",
+      "kd": 40,
+      "kp": 400,
+      "lower_limit": -0.6,
+      "max_torque": 60,
+      "name": "neck",
+      "parent": "chest",
+      "rest_anchor": [0, 1.46],
+      "upper_limit": 0.6
+    },
+    {
+      "child": "upper_arm_l",
+      "kd": 80,
+      "kp": 800,
+      "lower_limit": -1.2,
+      "max_torque": 120,
+      "name": "shoulder_l",
+      "parent": "chest",
+      "rest_anchor": [0, 1.4],
+      "upper_limit": 3
+    },
+    {
+      "child": "lower_arm_l",
+      "kd": 50,
+      "kp": 500,
+      "lower_limit": -0.1,
+      "max_torque": 80,
+      "name": "elbow_l",
+      "parent": "upper_arm_l",
+      "rest_anchor": [0, 1.12],
+      "upper_limit": 2.7
+    },
+    {
+      "child": "upper_arm_r",
+      "kd": 80,
+      "kp": 800,
+      "lower_limit": -1.2,
+      "max_torque": 120,
+      "name": "shoulder_r",
+      "parent": "chest",
+      "rest_anchor": [0, 1.4],
+      "upper_limit": 3
+    },
+    {
+      "child": "lower_arm_r",
+      "kd": 50,
+      "kp": 500,
+      "lower_limit": -0.1,
+      "max_torque": 80,
+      "name": "elbow_r",
+      "parent": "upper_arm_r",
+      "rest_anchor": [0, 1.12],
+      "upper_limit": 2.7
+    },
+    {
+      "child": "upper_leg_l",
+      "kd": 400,
+      "kp": 4000,
+      "lower_limit": -0.5,
+      "max_torque": 400,
+      "name": "hip_l",
+      "parent": "pelvis",
+      "rest_anchor": [0, 0.92],
+      "upper_limit": 2.1
+    },
+    {
+      "child": "lower_leg_l",
+      "kd": 300,
+      "kp": 3000,
+      "lower_limit": -2.6,
+      "max_torque": 300,
+      "name": "knee_l",
+      "parent": "upper_leg_l",
+      "rest_anchor": [0, 0.5],
+      "upper_limit": 0
+    },
+    {
+      "child": "foot_l",
+      "kd": 150,
+      "kp": 1500,
+      "lower_limit": -0.9,
+      "max_torque": 200,
+      "name": "ankle_l",
+      "parent": "lower_leg_l",
+      "rest_anchor": [0, 0.08],
+      "upper_limit": 0.5
+    },
+    {
+      "child": "upper_leg_r",
+      "kd": 400,
+      "kp": 4000,
+      "lower_limit": -0.5,
+      "max_torque": 400,
+      "name": "hip_r",
+      "parent": "pelvis",
+      "rest_anchor": [0, 0.92],
+      "upper_limit": 2.1
+    },
+    {
+      "child": "lower_leg_r",
+      "kd": 300,
+      "kp": 3000,
+      "lower_limit": -2.6,
+      "max_torque": 300,
+      "name": "knee_r",
+      "parent": "upper_leg_r",
+      "rest_anchor": [0, 0.5],
+      "upper_limit": 0
+    },
+    {
+      "child": "foot_r",
+      "kd": 150,
+      "kp": 1500,
+      "lower_limit": -0.9,
+      "max_torque": 200,
+      "name": "ankle_r",
+      "parent": "lower_leg_r",
+      "rest_anchor": [0, 0.08],
+      "upper_limit": 0.5
+    }
+  ],
+  "links": [
+    {
+      "friction": 0.9,
+      "half_length": 0.08,
+      "mass": 12,
+      "name": "pelvis",
+      "radius": 0.09,
+      "rest_angle": 0,
+      "rest_position": [0, 1],
+      "restitution": 0
+    },
+    {
+      "friction": 0.9,
+      "half_length": 0.19,
+      "mass": 22,
+      "name": "chest",
+      "radius": 0.11,
+      "rest_angle": 0,
+      "rest_position": [0, 1.27],
+      "restitution": 0
+    },
+    {
+      "friction": 0.9,
+      "half_length": 0.04,
+      "mass": 5,
+      "name": "head",
+      "radius": 0.1,
+      "rest_angle": 0,
+      "rest_position": [0, 1.5],
+      "restitution": 0
+    },
+    {
+      "friction": 0.9,
+      "half_length": 0.14,
+      "mass": 2,
+      "name": "upper_arm_l",
+      "radius": 0.045,
+      "rest_angle": 0,
+      "rest_position": [0, 1.26],
+      "restitution": 0
+    },
+    {
+      "friction": 0.9,
+      "half_length": 0.14,
+      "mass": 1.5,
+      "name": "lower_arm_l",
+      "radius": 0.04,
+      "rest_angle": 0,
+      "rest_position": [0, 0.98],
+      "restitution": 0
+    },
+    {
+      "friction": 0.9,
+      "half_length": 0.14,
+      "mass": 2,
+      "name": "upper_arm_r",
+      "radius": 0.045,
+      "rest_angle": 0,
+      "rest_position": [0, 1.26],
+      "restitution": 0
+    },
+    {
+      "friction": 0.9,
+      "half_length": 0.14,
+      "mass": 1.5,
+      "name": "lower_arm_r",
+      "radius": 0.04,
+      "rest_angle": 0,
+      "rest_position": [0, 0.98],
+      "restitution": 0
+    },
+    {
+      "friction": 0.9,
+      "half_length": 0.21,
+      "mass": 7,
+      "name": "upper_leg_l",
+      "radius": 0.06,
+      "rest_angle": 0,
+      "rest_position": [0, 0.71],
+      "restitution": 0
+    },
+    {
+      "friction": 0.9,
+      "half_length": 0.21,
+      "mass": 3.5,
+      "name": "lower_leg_l",
+      "radius": 0.05,
+      "rest_angle": 0,
+      "rest_position": [0, 0.29],
+      "restitution": 0
+    },
+    {
+      "friction": 1,
+      "half_length": 0.09,
+      "mass": 1,
+      "name": "foot_l",
+      "radius": 0.04,
+      "rest_angle": -1.5707964,
+      "rest_position": [0.05, 0.04],
+      "restitution": 0
+    },
+    {
+      "friction": 0.9,
+      "half_length": 0.21,
+      "mass": 7,
+      "name": "upper_leg_r",
+      "radius": 0.06,
+      "rest_angle": 0,
+      "rest_position": [0, 0.71],
+      "restitution": 0
+    },
+    {
+      "friction": 0.9,
+      "half_length": 0.21,
+      "mass": 3.5,
+      "name": "lower_leg_r",
+      "radius": 0.05,
+      "rest_angle": 0,
+      "rest_position": [0, 0.29],
+      "restitution": 0
+    },
+    {
+      "friction": 1,
+      "half_length": 0.09,
+      "mass": 1,
+      "name": "foot_r",
+      "radius": 0.04,
+      "rest_angle": -1.5707964,
+      "rest_position": [0.05, 0.04],
+      "restitution": 0
+    }
+  ]
+}

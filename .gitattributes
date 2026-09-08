@@ -1,0 +1,12 @@
+# Normalize to LF in the repository. Without this, a Windows clone commits CRLF
+# into source and data files, and anything that hashes or byte-compares a
+# checked-in file (reference motions, protocol fixtures) fails everywhere else.
+* text=auto eol=lf
+
+# Windows-only, and PowerShell is happier with CRLF on disk.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+
+*.png binary
+*.jpg binary
+*.pt binary

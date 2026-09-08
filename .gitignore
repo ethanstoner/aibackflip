@@ -1,0 +1,19 @@
+build/
+out/
+.vs/
+*.user
+
+__pycache__/
+*.py[cod]
+venv/
+.pytest_cache/
+
+# Training artefacts: reproduced from configs + seeds, too large to version.
+runs/
+checkpoints/*.pt
+checkpoints/*.json
+!checkpoints/.gitkeep
+
+# Internal working notes never belong in this repo.
+CLAUDE.md
+PROJECT_STATUS.md

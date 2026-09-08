@@ -1,0 +1,6 @@
+# torch is inherited from the system interpreter via `python -m venv --system-site-packages`.
+# Installing it here would re-download ~2.5 GB of CUDA wheels for no gain.
+#   torch==2.6.0+cu124  (verified present, CUDA available on an RTX 4090)
+numpy>=2.0
+tensorboard>=2.20
+pytest>=8.0

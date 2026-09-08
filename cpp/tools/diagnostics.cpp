@@ -185,6 +185,72 @@ void sectionPerturbation() {
                 "  it survives by stiffness alone. M5 is where balance is actually learned.\n");
 }
 
+// Can each joint's motor actually drive its own subtree to a commanded angle
+// against gravity, and does it need to saturate to do it? Gains that look
+// plausible in aggregate can still leave one joint unable to lift its own limb,
+// and that shows up during training as a policy that never uses it.
+void sectionJointAuthority() {
+    std::printf("\n== per-joint motor authority (pelvis pinned, gravity on, 2.5 s hold) ==\n");
+    std::printf("  %-12s %8s %8s %8s %10s %10s %7s\n", "joint", "target", "reached", "error",
+                "peak tau", "hold tau", "of max");
+
+    const Humanoid2DConfig config = Humanoid2DConfig::defaults();
+    Real worstError = 0;
+    const char* worstJoint = "";
+
+    for (int j = 0; j < kJointCount; ++j) {
+        World2D world;
+        world.addHalfSpace(HalfSpace{Vec2(0, 1), Real(-5), Real(1.0), Real(0)});
+        Humanoid2D figure;
+        figure.build(world, config);
+        figure.reset(world, config.links[kPelvis].restPosition);
+        figure.setMotorsEnabled(world, true);
+        figure.link(world, kPelvis).makeStatic();
+
+        // Command 70% of the way towards whichever limit is further from rest,
+        // so the joint has to work rather than sit near its neutral pose.
+        const JointConfig& jc = config.joints[static_cast<size_t>(j)];
+        const Real reach = (std::abs(jc.upperLimit) > std::abs(jc.lowerLimit)) ? jc.upperLimit
+                                                                              : jc.lowerLimit;
+        const Real target = reach * Real(0.7);
+        figure.setJointTarget(world, j, target);
+
+        // Peak torque is dominated by the transient: a step command starts with
+        // a huge kp*error and clamps immediately, so peaking at 100% says
+        // nothing. What matters is the torque still needed once settled.
+        const int total = stepsFor(Real(2.5));
+        const int holdFrom = stepsFor(Real(2.0));
+        Real peakTorque = 0;
+        Real holdSum = 0;
+        int holdSamples = 0;
+        for (int i = 0; i < total; ++i) {
+            world.step(kDt);
+            const RevoluteJoint2D& rj = figure.joint(world, j);
+            const Real torque = std::abs(rj.motorImpulse) / kDt;
+            peakTorque = std::max(peakTorque, torque);
+            if (i >= holdFrom) {
+                holdSum += torque;
+                ++holdSamples;
+            }
+        }
+        const Real holdTorque = holdSamples > 0 ? holdSum / Real(holdSamples) : Real(0);
+
+        const Real reached = figure.jointAngle(world, j);
+        const Real error = std::abs(reached - target);
+        if (error > worstError) {
+            worstError = error;
+            worstJoint = jc.name.c_str();
+        }
+        std::printf("  %-12s %+8.3f %+8.3f %8.4f %8.1f Nm %8.1f Nm %6.0f%%\n", jc.name.c_str(),
+                    double(target), double(reached), double(error), double(peakTorque),
+                    double(holdTorque), double(holdTorque / jc.maxTorque * Real(100)));
+    }
+    std::printf("  worst tracking error: %.4f rad (%s)\n", double(worstError), worstJoint);
+    std::printf("  peak torque saturates on a step command by construction and is not a\n"
+                "  problem. Hold torque is the diagnostic: near 100%% there means the joint is\n"
+                "  out of authority even at rest, and the ceiling or the gain has to rise.\n");
+}
+
 void sectionThroughput() {
     std::printf("\n== headless throughput ==\n");
 
@@ -236,6 +302,7 @@ int main(int argc, char** argv) {
     if (wanted("drift")) sectionJointDrift();
     if (wanted("energy")) sectionEnergy();
     if (wanted("resting")) sectionResting();
+    if (wanted("authority")) sectionJointAuthority();
     if (wanted("perturbation")) sectionPerturbation();
     if (wanted("throughput")) sectionThroughput();
     std::printf("\n");

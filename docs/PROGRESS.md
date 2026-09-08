@@ -236,3 +236,111 @@ hand) and is already covered by six tests plus the perturbation table above. M2 
 narrows to: an interactive joint-posing mode for driving targets by keyboard, a torque/gain
 sweep to check the defaults are sane per joint rather than plausible in aggregate, and
 confirming limbs are driven rather than teleported for every joint, not just the ones tested.
+
+---
+
+## M2 — actuated joints
+
+**Status:** done (2026-09-08)
+
+### Implemented
+
+The motor itself shipped with M1, so M2 is about proving it works on all twelve joints rather
+than on the two the pendulum tests covered.
+
+- **Interactive posing.** Up/down selects a joint, left/right drives its target, `0` returns
+  every target to the rest pose. Driving a target auto-enables the motors — silently moving a
+  value nothing reads is a confusing dead end. The window title shows the selected joint's
+  commanded and actual angle side by side, so tracking error is visible while posing.
+- **`--pin`** freezes the pelvis so joint ranges can be driven and inspected without the figure
+  toppling. Purely a debugging aid.
+- **`--pose <name>`** commands a built-in pose (`squat`, `reach`, `tuck`, `lunge`). These set
+  joint *targets* only: the PD motors apply bounded torque, gravity and contacts push back, and
+  the shape that appears is whatever the solver converges on. A pose the figure cannot
+  physically hold simply does not appear.
+- **`aibf_diag authority`** sweeps every joint and reports what it can actually do.
+
+### The motor formulation, and why not the obvious one
+
+The spec's `torque = kp*error - kd*rate` is implemented, but solved as an implicit soft
+constraint rather than applied as an explicit external torque:
+
+```
+gamma (CFM) = 1 / (h*(kd + h*kp))
+bias        = kp/(kd + h*kp) * C
+softMass    = 1 / (invI_a + invI_b + gamma)
+impulse     = -softMass * (Cdot + bias + gamma*accumulated),  clamped to +/- maxTorque*h
+```
+
+The explicit form is only stable while `kp*h^2` stays below the joint's inertia, which rules
+out the stiffnesses an acrobatic motion needs. `JointMotor.staysStableAtStiffnessThatWouldBlowUpAnExplicitPD`
+runs kp = 500 000 at 1/240 s — roughly 2.4x past the explicit stability limit for that link —
+and tracks its target to 0.05 rad with zero velocity clamp events.
+
+### Tested
+
+**133 C++ cases, all passing** (up from 121). Eighteen cover the motors specifically.
+
+Per-joint authority, pelvis pinned, commanded 70% of the way toward the further limit and held
+2.5 s (`aibf_diag authority`):
+
+| joint | target | reached | error | hold torque | % of ceiling |
+|---|---|---|---|---|---|
+| waist | -0.560 | -0.569 | 0.0089 | 35.5 N·m | 9% |
+| neck | -0.420 | -0.422 | 0.0020 | 0.8 N·m | 1% |
+| shoulder (each) | +2.100 | +2.090 | 0.0097 | 7.8 N·m | 6% |
+| elbow (each) | +1.890 | +1.886 | 0.0039 | 2.0 N·m | 2% |
+| hip (each) | +1.470 | +1.459 | 0.0111 | 44.5 N·m | 11% |
+| knee (each) | -1.820 | -1.816 | 0.0038 | 11.5 N·m | 4% |
+| ankle (each) | -0.630 | -0.630 | 0.0001 | 0.2 N·m | 0% |
+
+Every joint reaches its commanded angle, worst error 0.0111 rad (0.64°), and none needs more
+than 11% of its torque ceiling to hold. The residual error is not a defect: a proportional
+motor holding a load settles at (load torque)/kp by definition.
+
+Peak torque hits 100% of the ceiling on most joints, and that is meaningless — a step command
+starts with an enormous `kp*error` and clamps instantly. Only the settled holding torque says
+whether a joint is out of authority, which is why the diagnostic now reports both.
+
+Robustness under conditions that match an untrained policy:
+
+- 6 s of uniformly random normalized targets on all twelve joints, re-sampled at 60 Hz, pelvis
+  pinned: stable, zero velocity clamp events, anchor error under 5e-3 m.
+- The same for 10 s with the figure free to fall, so contacts and motors fight simultaneously:
+  stable, anchor error under 1e-2 m, penetration under 0.02 m, every body finite.
+
+Action mapping is pinned in both directions: -1 maps to the lower limit, +1 to the upper, 0 to
+the midpoint, and out-of-range samples clamp rather than extrapolate. That last one matters —
+a Gaussian policy samples outside [-1, 1] constantly, and extrapolating would hand the solver
+targets outside the joint's own limits for the limit constraints to fight every step.
+
+Visual verification (`--pose <name> --pin`, frames inspected):
+
+- **squat** — torso leaning slightly forward, thighs forward, knees bent, shins back, foot flat,
+  arms extended forward. Worst tracking error 0.0105 rad.
+- **tuck** — knees drawn to the chest, arms folded, torso curled, head tucked. Recognisably the
+  shape a backflip needs. Worst tracking error 0.0174 rad.
+- **reach**, **lunge** — as commanded, worst errors 0.0040 and 0.0111 rad.
+
+The squat confirmed every joint sign convention derived on paper: hip flexion positive, knee
+flexion negative, ankle dorsiflexion positive, waist flexion negative, shoulder forward
+positive. Had any of those been backwards the pose would have come out visibly wrong, which is
+exactly why it was worth rendering rather than only asserting angles.
+
+### Known issues
+
+- **The torque ceilings are generous.** 400 N·m at the hip is roughly twice a human's peak
+  (~2-3 N·m/kg for a 69 kg figure). That is deliberate headroom for now, but it is also an
+  invitation for a policy to find superhuman solutions. If the learned motions in M5-M8 look
+  physically implausible, the ceilings are the first thing to cut. Recorded here so that is a
+  decision rather than an oversight.
+- Damping ratios are conservative (roughly 5x critical at the knee). Safe, and it costs
+  response speed; worth revisiting if imitation tracking turns out sluggish.
+- Posing drives one joint at a time by keyboard. Fine for inspection; authoring whole reference
+  motions is what the M7 animator is for.
+
+### Next
+
+M3 — the C++/Python UDP bridge: batched little-endian protocol with a HELLO/SPEC handshake,
+the environment batch on the C++ side, the client and vectorised adapter on the Python side,
+and a random-action loop proving both directions end to end with timeouts and recovery.

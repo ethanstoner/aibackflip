@@ -34,6 +34,7 @@ struct Options {
     bool motorsOn = false;
     std::string configPath;
     std::string dumpConfigPath;
+    std::string poseName;
     // Automated capture: simulate `captureTime` seconds, write a PNG, exit.
     // This is how rendered output gets checked without a person watching.
     std::string capturePath;
@@ -41,6 +42,7 @@ struct Options {
     int captureCount = 1;
     Real captureInterval = Real(0.5);
     bool hidden = false;
+    bool pinPelvis = false;
     uint64_t seed = 1;
 };
 
@@ -51,6 +53,8 @@ void printUsage() {
         "  --config <path>          humanoid config JSON (defaults are built in)\n"
         "  --dump-config <path>     write the effective config as JSON and exit\n"
         "  --motors                 start with the joint motors holding the rest pose\n"
+        "  --pin                    hold the pelvis fixed, for inspecting joint ranges\n"
+        "  --pose <name>            command a built-in pose: squat, reach, tuck, lunge\n"
         "  --width/--height <n>     window size\n"
         "  --seed <n>               RNG seed\n"
         "  --capture <path.png>     simulate, screenshot, and exit (no interaction)\n"
@@ -66,6 +70,7 @@ void printUsage() {
         "  o      outlines       j  joint targets      v  velocities\n"
         "  c      contacts       t  trails             k  centre of mass\n"
         "  f      camera follow  p  screenshot\n"
+        "  up/dn  select joint   left/right  drive its target    0  zero all targets\n"
         "  mouse  left-drag a limb, right-click to shove, wheel to zoom\n");
 }
 
@@ -82,11 +87,13 @@ bool parseOptions(int argc, char** argv, Options& out, bool& probeOnly, bool& sh
         else if (arg == "--check-gl") { probeOnly = true; }
         else if (arg == "--motors") { out.motorsOn = true; }
         else if (arg == "--hidden") { out.hidden = true; }
+        else if (arg == "--pin") { out.pinPelvis = true; }
         else if (arg == "--width") { nextInt(out.width); }
         else if (arg == "--height") { nextInt(out.height); }
         else if (arg == "--seed" && i + 1 < argc) { out.seed = std::strtoull(argv[++i], nullptr, 10); }
         else if (arg == "--config" && i + 1 < argc) { out.configPath = argv[++i]; }
         else if (arg == "--dump-config" && i + 1 < argc) { out.dumpConfigPath = argv[++i]; }
+        else if (arg == "--pose" && i + 1 < argc) { out.poseName = argv[++i]; }
         else if (arg == "--capture" && i + 1 < argc) { out.capturePath = argv[++i]; }
         else if (arg == "--capture-time") { next(out.captureTime); }
         else if (arg == "--capture-count") { nextInt(out.captureCount); }
@@ -124,6 +131,37 @@ int probeGl() {
     glfwDestroyWindow(window);
     glfwTerminate();
     return 0;
+}
+
+// Built-in poses for checking that the motors can actually produce a shape.
+//
+// These set joint *targets* only. The physics still has to get there: the PD
+// motors apply bounded torque, gravity and contacts push back, and the result
+// is whatever the solver converges on. Nothing here moves a body directly, so a
+// pose that the figure cannot physically hold simply will not appear.
+struct NamedPose {
+    const char* name;
+    Real angles[kJointCount];
+};
+
+// Order matches JointId: waist, neck, shL, elL, shR, elR, hipL, kneeL, ankL,
+// hipR, kneeR, ankR.
+const NamedPose kPoses[] = {
+    {"squat", {Real(-0.35), 0, Real(1.10), Real(0.30), Real(1.10), Real(0.30), Real(1.30),
+               Real(-2.00), Real(0.45), Real(1.30), Real(-2.00), Real(0.45)}},
+    {"reach", {Real(0.20), Real(-0.30), Real(2.90), Real(0.05), Real(2.90), Real(0.05), 0, 0, 0,
+               0, 0, 0}},
+    {"tuck", {Real(-0.75), Real(-0.40), Real(2.00), Real(2.40), Real(2.00), Real(2.40),
+              Real(2.05), Real(-2.50), Real(-0.30), Real(2.05), Real(-2.50), Real(-0.30)}},
+    {"lunge", {Real(-0.20), 0, Real(1.80), Real(0.20), Real(-0.80), Real(0.20), Real(1.35),
+               Real(-0.55), Real(0.30), Real(-0.40), Real(-1.30), Real(-0.35)}},
+};
+
+const NamedPose* findPose(const std::string& name) {
+    for (const NamedPose& pose : kPoses) {
+        if (name == pose.name) return &pose;
+    }
+    return nullptr;
 }
 
 // Everything the interactive loop mutates, kept together so reset() is one call
@@ -234,6 +272,24 @@ int main(int argc, char** argv) {
     Simulation sim;
     sim.build(config, options.seed);
     sim.figure.setMotorsEnabled(sim.world, options.motorsOn);
+    if (options.pinPelvis) {
+        // Held in the air so joint ranges can be driven and inspected without
+        // the figure toppling. Purely a debugging aid; nothing else pins it.
+        sim.figure.link(sim.world, kPelvis).makeStatic();
+    }
+    if (!options.poseName.empty()) {
+        const NamedPose* pose = findPose(options.poseName);
+        if (!pose) {
+            std::fprintf(stderr, "unknown pose '%s'; try squat, reach, tuck or lunge\n",
+                         options.poseName.c_str());
+            return 2;
+        }
+        sim.figure.setMotorsEnabled(sim.world, true);
+        for (int j = 0; j < kJointCount; ++j) {
+            sim.figure.setJointTarget(sim.world, j, pose->angles[j]);
+        }
+        options.motorsOn = true;  // read below when the interactive toggle is initialised
+    }
 
     Camera2D camera;
     camera.center = Vec2(0, Real(0.9));
@@ -245,6 +301,7 @@ int main(int argc, char** argv) {
     bool motorsOn = options.motorsOn;
     bool followCamera = true;
     int screenshotIndex = 0;
+    int selectedJoint = kHipL;
 
     // Capture schedule, in simulated seconds.
     int capturesTaken = 0;
@@ -289,6 +346,31 @@ int main(int argc, char** argv) {
             if (input.keyPressed[GLFW_KEY_X]) {
                 RigidBody2D& pelvis = sim.figure.link(sim.world, kPelvis);
                 pelvis.applyImpulse(Vec2(Real(60), 0), Vec2(0, 0));
+            }
+
+            // ---- manual joint posing ----
+            if (input.keyPressed[GLFW_KEY_UP]) {
+                selectedJoint = (selectedJoint + kJointCount - 1) % kJointCount;
+            }
+            if (input.keyPressed[GLFW_KEY_DOWN]) {
+                selectedJoint = (selectedJoint + 1) % kJointCount;
+            }
+            if (input.keyPressed[GLFW_KEY_0]) {
+                sim.figure.holdRestPose(sim.world);
+            }
+            const Real nudge =
+                (input.keyDown[GLFW_KEY_RIGHT] ? Real(1) : Real(0)) -
+                (input.keyDown[GLFW_KEY_LEFT] ? Real(1) : Real(0));
+            if (nudge != Real(0)) {
+                // Driving a target implies wanting the motors on; silently
+                // moving a target that nothing reads is a confusing dead end.
+                if (!motorsOn) {
+                    motorsOn = true;
+                    sim.figure.setMotorsEnabled(sim.world, true);
+                }
+                const RevoluteJoint2D& rj = sim.figure.joint(sim.world, selectedJoint);
+                sim.figure.setJointTarget(sim.world, selectedJoint,
+                                          rj.targetAngle + nudge * Real(0.03));
             }
 
             if (input.scroll != Real(0)) {
@@ -379,6 +461,24 @@ int main(int argc, char** argv) {
                             double(sim.figure.link(sim.world, kPelvis).position.y),
                             double(sim.figure.headHeight(sim.world)),
                             double(sim.world.stats().maxJointAnchorError));
+                if (!options.poseName.empty()) {
+                    // Whether the motors actually produced the commanded shape
+                    // is the whole question, so report it rather than trusting
+                    // that the picture looks about right.
+                    Real worst = 0;
+                    const char* worstName = "";
+                    for (int j = 0; j < kJointCount; ++j) {
+                        const Real error =
+                            std::abs(sim.figure.jointAngle(sim.world, j) -
+                                     sim.figure.joint(sim.world, j).targetAngle);
+                        if (error > worst) {
+                            worst = error;
+                            worstName = config.joints[static_cast<size_t>(j)].name.c_str();
+                        }
+                    }
+                    std::printf("    pose '%s': worst joint tracking error %.4f rad (%s)\n",
+                                options.poseName.c_str(), double(worst), worstName);
+                }
             } else {
                 std::fprintf(stderr, "failed to write %s\n", path.c_str());
                 return 1;
@@ -391,14 +491,18 @@ int main(int argc, char** argv) {
         window.present();
 
         if (++frame % 15 == 0 && !capturing) {
-            char title[256];
+            const RevoluteJoint2D& rj = sim.figure.joint(sim.world, selectedJoint);
+            char title[320];
             std::snprintf(title, sizeof(title),
-                          "aibackflip | t=%.1fs | pelvis %.2fm | contacts %d | anchor err %.1e m | "
-                          "motors %s%s",
+                          "aibackflip | t=%.1fs | pelvis %.2fm | contacts %d | anchor %.1e m | "
+                          "motors %s | [%s] target %+.2f actual %+.2f%s",
                           double(sim.elapsed),
                           double(sim.figure.link(sim.world, kPelvis).position.y),
                           sim.world.stats().contactCount,
                           double(sim.world.stats().maxJointAnchorError), motorsOn ? "on" : "off",
+                          config.joints[static_cast<size_t>(selectedJoint)].name.c_str(),
+                          double(rj.targetAngle),
+                          double(sim.figure.jointAngle(sim.world, selectedJoint)),
                           paused ? " | PAUSED" : "");
             window.setTitle(title);
         }

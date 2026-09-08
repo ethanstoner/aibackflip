@@ -94,6 +94,7 @@ add_executable(aibf_tests
   cpp/tests/test_physics.cpp
   cpp/tests/test_joints.cpp
   cpp/tests/test_humanoid.cpp
+  cpp/tests/test_motors.cpp
 )
 target_link_libraries(aibf_tests PRIVATE aibf_humanoid)
 

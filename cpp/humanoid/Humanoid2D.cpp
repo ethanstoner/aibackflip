@@ -161,8 +161,21 @@ void Humanoid2D::setJointTarget(World2D& world, int jointId, Real angle) const {
 
 void Humanoid2D::setJointTargetNormalized(World2D& world, int jointId, Real action) const {
     const JointConfig& jc = config_.joints[static_cast<size_t>(jointId)];
-    const Real t = (clamp(action, Real(-1), Real(1)) + Real(1)) * Real(0.5);
-    joint(world, jointId).targetAngle = lerp(jc.lowerLimit, jc.upperLimit, t);
+    const Real a = clamp(action, Real(-1), Real(1));
+
+    // Piecewise-linear about the rest pose rather than linear across the range:
+    // action 0 commands the rest angle, +1 the upper limit, -1 the lower.
+    //
+    // The obvious mapping - lerp(lower, upper) - puts action 0 at the middle of
+    // each range, which for the knee's [-2.6, 0.05] is 1.3 rad of flexion. A
+    // freshly initialised policy outputs values near zero, so every early
+    // rollout would begin by folding the figure into a deep squat and learning
+    // would have to climb out of that before it could start. Centring on the
+    // rest pose costs nothing and makes "do nothing" mean "stand".
+    //
+    // Joint limits are validated to straddle zero, so both branches are usable.
+    const Real target = (a >= Real(0)) ? a * jc.upperLimit : -a * jc.lowerLimit;
+    joint(world, jointId).targetAngle = clamp(target, jc.lowerLimit, jc.upperLimit);
 }
 
 void Humanoid2D::applyNormalizedActions(World2D& world, const Real* actions, int count) const {

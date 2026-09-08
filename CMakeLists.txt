@@ -63,8 +63,25 @@ target_link_libraries(aibf_physics PUBLIC aibf_core)
 add_library(aibf_humanoid STATIC
   cpp/humanoid/HumanoidConfig.cpp
   cpp/humanoid/Humanoid2D.cpp
+  cpp/humanoid/Observation.cpp
+  cpp/humanoid/RewardTerms.cpp
 )
 target_link_libraries(aibf_humanoid PUBLIC aibf_physics)
+
+# ---------------------------------------------------------------- env + bridge
+# No rendering dependency anywhere in here: a headless training run must not
+# link GLFW or OpenGL at all.
+add_library(aibf_env_lib STATIC
+  cpp/env/Env2D.cpp
+  cpp/env/EnvBatch.cpp
+  cpp/net/Protocol.cpp
+  cpp/net/UDPSocket.cpp
+  cpp/net/EnvServer.cpp
+)
+target_link_libraries(aibf_env_lib PUBLIC aibf_humanoid)
+if(WIN32)
+  target_link_libraries(aibf_env_lib PUBLIC ws2_32)
+endif()
 
 # ---------------------------------------------------------------- executables
 # ---------------------------------------------------------------- rendering
@@ -86,6 +103,19 @@ target_link_libraries(aibackflip PRIVATE aibf_engine)
 add_executable(aibf_diag cpp/tools/diagnostics.cpp)
 target_link_libraries(aibf_diag PRIVATE aibf_humanoid)
 
+# The environment server. Linked against the renderer so --render can show one
+# environment, but AIBF_WITH_RENDERER is the only thing that pulls GL in, and a
+# headless run never creates a context.
+# Writes reference packets for the Python suite to decode, and verifies packets
+# Python encoded. Round-trip tests within one language cannot catch the two
+# implementations drifting apart; this can.
+add_executable(aibf_fixture cpp/tools/protocol_fixture.cpp)
+target_link_libraries(aibf_fixture PRIVATE aibf_env_lib)
+
+add_executable(aibf_env cpp/tools/envserver.cpp)
+target_link_libraries(aibf_env PRIVATE aibf_env_lib aibf_engine)
+target_compile_definitions(aibf_env PRIVATE AIBF_WITH_RENDERER)
+
 add_executable(aibf_tests
   cpp/tests_main.cpp
   cpp/tests/test_math.cpp
@@ -95,8 +125,10 @@ add_executable(aibf_tests
   cpp/tests/test_joints.cpp
   cpp/tests/test_humanoid.cpp
   cpp/tests/test_motors.cpp
+  cpp/tests/test_protocol.cpp
+  cpp/tests/test_env.cpp
 )
-target_link_libraries(aibf_tests PRIVATE aibf_humanoid)
+target_link_libraries(aibf_tests PRIVATE aibf_env_lib)
 
 enable_testing()
 add_test(NAME cpp_unit COMMAND aibf_tests)

@@ -106,10 +106,10 @@ Humanoid2DConfig Humanoid2DConfig::defaults() {
     cfg.joints[kShoulderR] = makeJoint("shoulder_r", kChest,     kUpperArmR, shoulder, Real(-1.2), Real(3.0),  Real(800),  Real(80),  Real(120));
     cfg.joints[kElbowR]    = makeJoint("elbow_r",    kUpperArmR, kLowerArmR, elbow,    Real(-0.1), Real(2.7),  Real(500),  Real(50),  Real(80));
     cfg.joints[kHipL]      = makeJoint("hip_l",      kPelvis,    kUpperLegL, hip,      Real(-0.5), Real(2.1),  Real(4000), Real(400), Real(400));
-    cfg.joints[kKneeL]     = makeJoint("knee_l",     kUpperLegL, kLowerLegL, knee,     Real(-2.6), Real(0.0),  Real(3000), Real(300), Real(300));
+    cfg.joints[kKneeL]     = makeJoint("knee_l",     kUpperLegL, kLowerLegL, knee,     Real(-2.6), Real(0.05), Real(3000), Real(300), Real(300));
     cfg.joints[kAnkleL]    = makeJoint("ankle_l",    kLowerLegL, kFootL,     ankle,    Real(-0.9), Real(0.5),  Real(1500), Real(150), Real(200));
     cfg.joints[kHipR]      = makeJoint("hip_r",      kPelvis,    kUpperLegR, hip,      Real(-0.5), Real(2.1),  Real(4000), Real(400), Real(400));
-    cfg.joints[kKneeR]     = makeJoint("knee_r",     kUpperLegR, kLowerLegR, knee,     Real(-2.6), Real(0.0),  Real(3000), Real(300), Real(300));
+    cfg.joints[kKneeR]     = makeJoint("knee_r",     kUpperLegR, kLowerLegR, knee,     Real(-2.6), Real(0.05), Real(3000), Real(300), Real(300));
     cfg.joints[kAnkleR]    = makeJoint("ankle_r",    kLowerLegR, kFootR,     ankle,    Real(-0.9), Real(0.5),  Real(1500), Real(150), Real(200));
 
     return cfg;
@@ -251,6 +251,13 @@ std::string Humanoid2DConfig::validate() const {
         }
         if (!(joint.lowerLimit < joint.upperLimit)) {
             return "joint '" + joint.name + "' has an empty limit range";
+        }
+        // The rest pose reads zero on every joint by construction, and the
+        // action mapping is piecewise-linear about it. A range that does not
+        // straddle zero would make the rest pose illegal and leave one half of
+        // the action range unreachable.
+        if (joint.lowerLimit > Real(0) || joint.upperLimit < Real(0)) {
+            return "joint '" + joint.name + "' has limits that do not straddle the rest angle";
         }
         if (joint.stiffness < Real(0) || joint.damping < Real(0) || joint.maxTorque < Real(0)) {
             return "joint '" + joint.name + "' has a negative gain";

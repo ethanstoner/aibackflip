@@ -344,3 +344,151 @@ exactly why it was worth rendering rather than only asserting angles.
 M3 — the C++/Python UDP bridge: batched little-endian protocol with a HELLO/SPEC handshake,
 the environment batch on the C++ side, the client and vectorised adapter on the Python side,
 and a random-action loop proving both directions end to end with timeouts and recovery.
+
+---
+
+## M3 — the C++ to Python bridge
+
+**Status:** done (2026-09-08)
+
+M3 absorbed the observation and reward design that the plan had put in M4, because the protocol
+cannot be defined without them. M4 narrows to normalisation, the policy network and
+checkpointing.
+
+### Implemented
+
+- **`cpp/humanoid/Observation.cpp`** — a 111-value observation. Layout, rationale and the exact
+  index map are in [`docs/OBSERVATIONS.md`](OBSERVATIONS.md).
+- **`cpp/humanoid/RewardTerms.cpp`** — 13 raw, unweighted reward components. The simulator
+  computes terms; Python applies weights and sums.
+- **`cpp/env/Env2D.cpp`** — the episodic environment: control at 60 Hz over four 240 Hz physics
+  substeps, reset noise, six named termination reasons, truncation kept distinct from
+  termination, and a disturbance hook for M6.
+- **`cpp/env/EnvBatch.cpp`** — N environments with auto-reset and final-observation capture.
+- **`cpp/net/Protocol.cpp`**, **`UDPSocket.cpp`**, **`EnvServer.cpp`** — the wire format, a thin
+  socket wrapper, and the request/response server. Documented in
+  [`docs/PROTOCOL.md`](PROTOCOL.md).
+- **`aibf_env`** — the environment host. `--headless` never touches OpenGL; `--render` shows one
+  environment while serving the same batch; `--capture` screenshots what a policy is doing.
+- **`aibf_fixture`** — writes reference packets for Python to decode and verifies packets Python
+  encoded.
+- **Python** — `communication/protocol.py`, `client.py`, `vec_env.py`, and `random_agent.py`.
+
+### Build / run
+
+```powershell
+.\build\bin\Release\aibf_env.exe --headless --port 51234 --envs 25
+python python\random_agent.py --envs 25 --steps 2000 --show-obs
+.\build\bin\Release\aibf_env.exe --render --envs 8      # watch one while it trains
+```
+
+### Tested
+
+**183 C++ cases and 37 Python cases, all passing** (up from 133 and 9).
+
+The Python suite now includes 19 end-to-end tests that spawn a real `aibf_env` process on a
+private port and drive it over a real socket, plus 9 cross-language protocol tests.
+
+**Cross-language agreement is tested in both directions.** Round-tripping a packet inside one
+language proves only that a codec is self-consistent. `aibf_fixture` writes SPEC and STATE
+packets that the Python suite decodes and asserts on, and Python writes an ACTION packet that
+the C++ side decodes and asserts on. The fixture values are deliberately awkward — negative
+zero, denormals, `12345.6789f`, `UINT32_MAX` — and the comparison is bit-exact via `tobytes()`,
+not `approx`. Negative zero surviving as negative zero is checked explicitly.
+
+**Robustness is fuzzed rather than argued.** 3000 random buffers (a third with a valid preamble,
+so the fuzz reaches the payload decoders rather than bouncing off the magic check) are fed to
+every decoder; every truncation of a valid packet is rejected; a length field claiming 65535
+environments in a 40-byte datagram is refused on the arithmetic before anything is allocated.
+
+**Behavioural checks, not just plumbing.** Two different action streams must produce two
+different trajectories, or a bridge that silently dropped every action would pass every shape
+and finiteness check. A zero policy must end fewer episodes than a random one. A stationary
+policy must score higher than a flailing one, or there would be nothing for PPO to climb.
+
+### Measured
+
+| Environments | Round trips/s | Env-steps/s | vs real time |
+|---|---|---|---|
+| 1 | 6 831 | 6 831 | 114x |
+| 8 | 2 918 | 23 346 | 49x |
+| 25 | 1 328 | 33 198 | 22x |
+| 32 | 1 073 | 34 352 | 18x |
+
+Zero timeouts, zero stale packets and zero malformed packets across 2002 round trips at 25
+environments.
+
+**The transport is not the bottleneck.** The single-environment figure is the round-trip
+ceiling — about 6 800/s, dominated by Python-side overhead rather than the socket. At 32
+environments the loop needs 1 073 of those, leaving roughly **6x headroom**. Against the
+37 700 env-steps/s that headless physics alone achieves for the same batch, the bridge costs
+about 9%. The plan's concern about UDP becoming the bottleneck is retired, and shared memory
+stays unbuilt until something measures slow.
+
+A random policy survives 60 control steps (1.0 s) on average before terminating, which is the
+baseline M5 has to beat.
+
+Visual verification: `aibf_env --render` was captured mid-episode while a Python sine policy
+drove it, showing environment 0 buckling under actions arriving over the socket.
+
+### Design decisions that changed during the milestone
+
+Three things were designed one way, found wanting, and changed. All three would have been much
+more expensive to discover during M5.
+
+1. **Action 0 mapped to the middle of each joint range.** For the knee's `[-2.6, 0.05]` that is
+   1.3 radians of flexion, so a freshly initialised policy — which outputs values near zero —
+   would begin every rollout by folding the figure into a deep squat, and learning would have
+   to climb out of that before it could start. The mapping is now piecewise-linear about the
+   **rest pose**: 0 commands the rest angle, ±1 the limits. Joint limits are now validated to
+   straddle zero so both branches are usable, and the knee's upper limit moved from exactly 0 to
+   0.05 rad so half its action range is not dead.
+
+2. **Explicit reset masks.** The original design had Python request a reset on the step after an
+   episode ended. That wastes a control step per episode and, worse, punches a hole in the
+   fixed (steps × environments) block PPO wants. Environments now auto-reset, and the STATE
+   packet carries the observation each finished episode ended on. Both halves matter: auto-reset
+   keeps every step a real transition, and the final observation is what a **truncated** episode
+   bootstraps its value estimate from. Dropping it teaches the critic that reaching the time
+   limit is worth zero — the classic time-limit bootstrapping bug.
+
+3. **The server exited when a client disconnected.** A trainer that crashes and restarts should
+   be able to reconnect without the simulator being relaunched too. BYE now makes the server
+   forget its client and keep listening; `--exit-on-bye` opts into the old behaviour for
+   scripted runs.
+
+### Problems hit and how they were resolved
+
+1. **Access violation in every environment test.** `EnvConfig`'s `Humanoid2DConfig` member was
+   default-constructed, and *that* type's default has empty link and joint vectors — so the
+   first index of `kPelvis` walked off the end of an empty vector. A struct whose default state
+   is unusable is a trap; the default is now the real figure, and a test asserts a
+   default-constructed `EnvConfig` validates.
+2. **Reset noise was zero by default**, so every episode began from an identical state
+   regardless of seed. Caught by a test asserting two different seeds produce different
+   observations. Since the rest pose is a perfectly symmetric equilibrium, a policy trained from
+   an unperturbed start would have scored well while learning nothing. Defaults are now small
+   but non-zero, and a test pins that property on the shipped config rather than on a fixture.
+3. **The encoder could emit undecodable packets.** A caller that left one array shorter than the
+   count it declared produced a packet no decoder could read. The encoder now writes exactly the
+   counts in the header, zero-filling a short vector.
+4. **A test asserted translation invariance to 1e-5 and failed at 1e-5.** The cause was float
+   precision at x = 37.5 m, not a leak of absolute position. The tolerance is now derived from
+   float epsilon at the offset being tested, so it distinguishes rounding from a real leak
+   instead of being loosened until it passes.
+
+### Known issues
+
+- The batch is single-threaded. At 34 000 env-steps/s with 6x transport headroom, threading
+  would only help if the physics budget became the binding constraint — it has not.
+- `--render` costs throughput because serving and drawing share a thread. Fine for watching;
+  training runs headless.
+- The reward weights in `RewardWeights.standing()` are a starting point, not a tuned result.
+  Nothing has been trained yet.
+
+### Next
+
+M4 — observation normalisation with running mean/std saved alongside checkpoints, the
+actor-critic network (tanh MLP, Gaussian policy with a state-independent log-std), and
+checkpoint save/load. Then M5 puts PPO on top of it and finds out whether the humanoid can
+learn to stand.

@@ -153,10 +153,28 @@ TEST(Motor, normalizedActionsSpanExactlyTheJointRange) {
         scene.figure.setJointTargetNormalized(scene.world, j, Real(1));
         CHECK_NEAR(scene.figure.joint(scene.world, j).targetAngle, jc.upperLimit, 1e-5);
 
+        // Zero commands the rest pose, not the middle of the range. A policy
+        // that has learned nothing yet emits values near zero, and this is what
+        // makes that mean "stand" rather than "fold up".
         scene.figure.setJointTargetNormalized(scene.world, j, Real(0));
-        CHECK_NEAR(scene.figure.joint(scene.world, j).targetAngle,
-                   (jc.lowerLimit + jc.upperLimit) * Real(0.5), 1e-5);
+        CHECK_NEAR(scene.figure.joint(scene.world, j).targetAngle, 0.0, 1e-6);
+
+        // Monotonic and half-scaled either side of the rest pose.
+        scene.figure.setJointTargetNormalized(scene.world, j, Real(0.5));
+        CHECK_NEAR(scene.figure.joint(scene.world, j).targetAngle, jc.upperLimit * Real(0.5), 1e-5);
+        scene.figure.setJointTargetNormalized(scene.world, j, Real(-0.5));
+        CHECK_NEAR(scene.figure.joint(scene.world, j).targetAngle, jc.lowerLimit * Real(0.5), 1e-5);
     }
+}
+
+TEST(Motor, aZeroActionVectorHoldsTheRestPose) {
+    // The property the mapping exists for, checked end to end rather than on
+    // the mapping function alone.
+    PinnedFigure scene;
+    const std::vector<Real> zeros(kJointCount, Real(0));
+    scene.figure.applyNormalizedActions(scene.world, zeros.data(), kJointCount);
+    scene.run(Real(2));
+    for (int j = 0; j < kJointCount; ++j) CHECK(std::abs(scene.angle(j)) < Real(0.03));
 }
 
 TEST(Motor, outOfRangeActionsClampRatherThanExtrapolate) {
@@ -176,12 +194,16 @@ TEST(Motor, outOfRangeActionsClampRatherThanExtrapolate) {
 
 TEST(Motor, applyNormalizedActionsHandlesShortAndLongVectors) {
     PinnedFigure scene;
+    const Humanoid2DConfig config = Humanoid2DConfig::defaults();
+    // Drive a joint away from rest first, so "untouched" is distinguishable
+    // from "happens to be at zero".
+    scene.figure.setJointTarget(scene.world, 5, config.joints[5].upperLimit);
+
     const std::vector<Real> few(3, Real(1));
     scene.figure.applyNormalizedActions(scene.world, few.data(), static_cast<int>(few.size()));
-    const Humanoid2DConfig config = Humanoid2DConfig::defaults();
     CHECK_NEAR(scene.figure.joint(scene.world, 0).targetAngle, config.joints[0].upperLimit, 1e-5);
-    // Joints past the end of the vector are untouched, not zeroed by accident.
-    CHECK_NEAR(scene.figure.joint(scene.world, 5).targetAngle, 0.0, 1e-6);
+    // Joints past the end of the vector keep whatever they had.
+    CHECK_NEAR(scene.figure.joint(scene.world, 5).targetAngle, config.joints[5].upperLimit, 1e-5);
 
     // A longer vector must not read past the joint array.
     const std::vector<Real> many(kJointCount + 8, Real(-1));

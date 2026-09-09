@@ -674,3 +674,83 @@ backwards, so the corrected expectation is now spelled out in the test.
 M6 — robustness: random shoves during training (`configs/env2d_robust.json`), wider reset noise,
 and an interactive mode for pushing the figure and throwing things at it. The bar is recovering
 from disturbances it never saw individually.
+
+---
+
+## M6 — recovering from being shoved
+
+**Status:** done (2026-09-08). **The exit criterion was met, including generalisation beyond
+the training range.**
+
+### Measuring it first
+
+The environment gained a *deterministic* disturbance schedule alongside the random one used for
+training: `interval_steps` fires an impulse exactly every N control steps with alternating side.
+Random shoves are right for training, because a policy must not be able to brace on a timer, but
+they make a terrible measurement — the survival rate would depend on how many shoves happened to
+land. `python/push_test.py` sweeps the magnitude under the fixed schedule and can run two
+checkpoints through an identical one.
+
+### The baseline is flat
+
+Before training anything, the M5 standing policy was swept. It should be read as a warning about
+what "it stands perfectly" is worth:
+
+| impulse | survival | mean episode length |
+|---|---|---|
+| 0 N·s | 96% | 580 |
+| 20 N·s | 75% | 565 |
+| 40 N·s | **4%** | 277 |
+| 60 N·s | 0% | 157 |
+
+**40 N·s is exactly where the pose-holding controller from M1 fell over.** Six million steps of
+training to stand perfectly bought essentially no ability to recover. It found a stable fixed
+point, not a strategy — which is why this is a separate milestone rather than a footnote to M5.
+
+### The result
+
+`configs/env2d_robust.json`: shoves of 12–95 N·s at ~one per 3.5 s, and roughly double the reset
+noise. 10M environment steps, ~21 minutes, best mean return +4129.
+
+| impulse | M5 standing | M6 robust |
+|---|---|---|
+| 0 N·s | 96% | **100%** |
+| 20 N·s | 75% | **100%** |
+| 40 N·s | 4% | **100%** |
+| 60 N·s | 0% | **100%** |
+| 80 N·s | 0% | **100%** |
+| 100 N·s | 0% | **100%** |
+| 130 N·s | 0% | **100%** |
+| 160 N·s | 0% | 0% |
+
+The survival threshold moved from 40 N·s to 130 N·s, with a clean cliff at 160.
+
+**The generalisation is the part that matters.** Training used 12–95 N·s. The policy survives
+100 and 130 N·s at a 100% rate — impulses half again as large as anything it ever saw. That is
+the exit criterion: recovering from disturbances it was never trained on individually, rather
+than memorising the ones it was.
+
+Recovery from a 55 N·s shove, captured frame by frame: the pelvis dips 19 mm (1.009 → 0.990 m)
+and is back to 1.006 m within 0.3 s, with both feet in contact throughout. At that magnitude the
+recovery is almost invisible, which is itself the finding — a shove that reliably felled the
+standing policy no longer registers.
+
+### Also added
+
+`aibf_env --render` gained interactive disturbance: `x`/`z` shove the pelvis (shift for a hard
+shove), `b` throws a ball, and the mouse drags a limb. These act on the live environment the
+trainer is stepping, so what is being poked is the same simulation being learned from.
+
+### Known issues
+
+- The 160 N·s failure is total rather than graceful — 0%, not a gradual decline. Whether that is
+  a genuine physical limit or the edge of what the training distribution supports has not been
+  separated.
+- The robust policy was not re-checked against the *undisturbed* standing task beyond the 0 N·s
+  row (100%), so any cost in stillness quality is unmeasured.
+- Both policies use the standing damping. The imitation configs override it (see M7) and the
+  comparison above would not transfer to those gains.
+
+### Next
+
+M7 — train the imitation stack, starting with arm-raise and squat, before anything acrobatic.

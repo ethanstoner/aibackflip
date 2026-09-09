@@ -1,0 +1,16 @@
+// Capture environment: one 55 N s shove every 90 control steps, alternating
+// side. Deterministic so screenshots can be timed around a known disturbance
+// rather than hoping one lands while the camera is looking.
+{
+  "max_episode_steps": 600,
+  "reset_noise": {
+    "root_angle": 0.05, "root_height": 0.01, "joint_angle": 0.05,
+    "linear_velocity": 0.1, "angular_velocity": 0.1
+  },
+  "disturbance": {
+    "interval_steps": 90,
+    "probability_per_step": 0.0,
+    "impulse_min": 55.0,
+    "impulse_max": 55.0
+  }
+}

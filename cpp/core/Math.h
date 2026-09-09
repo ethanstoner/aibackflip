@@ -352,6 +352,16 @@ inline Vec3 rotationVector(const Quat& q) {
     return shortest.axis() * (angle / axisLength);
 }
 
+// Exp map, the inverse of `rotationVector`: an axis scaled by its angle becomes
+// a rotation. This is how a 3-DOF joint target is built from three policy
+// outputs, and it is well behaved everywhere, unlike Euler angles, which gimbal
+// lock exactly where a shoulder spends most of its time.
+inline Quat quatFromRotationVector(const Vec3& v) {
+    const Real angle = length(v);
+    if (angle < kEpsilon) return Quat::identity();
+    return Quat::fromAxisAngle(v / angle, angle);
+}
+
 // Splits `q` into a rotation about `axis` and the rotation left over.
 //
 // Joint limits need this because "how far has the shoulder twisted" and "how far

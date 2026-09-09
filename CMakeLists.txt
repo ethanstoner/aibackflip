@@ -66,6 +66,8 @@ target_link_libraries(aibf_physics PUBLIC aibf_core)
 add_library(aibf_humanoid STATIC
   cpp/humanoid/HumanoidConfig.cpp
   cpp/humanoid/Humanoid2D.cpp
+  cpp/humanoid/HumanoidConfig3D.cpp
+  cpp/humanoid/Humanoid3D.cpp
   cpp/humanoid/Observation.cpp
   cpp/humanoid/RewardTerms.cpp
 )
@@ -144,6 +146,7 @@ add_executable(aibf_tests
   cpp/tests/test_body3d.cpp
   cpp/tests/test_collision3d.cpp
   cpp/tests/test_joints3d.cpp
+  cpp/tests/test_humanoid3d.cpp
 )
 target_link_libraries(aibf_tests PRIVATE aibf_env_lib)
 

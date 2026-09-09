@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace aibf {
 
@@ -22,6 +23,7 @@ void Humanoid2D::build(World2D& world, const Humanoid2DConfig& config) {
         bodyIndices_[i] = world.addBody(body);
     }
 
+    jointFrames_.assign(config_.joints.size(), JointFrame{});
     for (size_t i = 0; i < config_.joints.size(); ++i) {
         const JointConfig& jc = config_.joints[i];
         const LinkConfig& parent = config_.links[static_cast<size_t>(jc.parent)];
@@ -44,6 +46,9 @@ void Humanoid2D::build(World2D& world, const Humanoid2DConfig& config) {
         joint.damping = jc.damping;
         joint.maxTorque = jc.maxTorque;
         jointIndices_[i] = world.addJoint(joint);
+
+        jointFrames_[i] = JointFrame{jc.parent, jc.child, joint.localAnchorA, joint.localAnchorB,
+                                     joint.referenceAngle};
     }
 
     // Topological order: a joint may be applied once its parent link has been
@@ -68,6 +73,112 @@ void Humanoid2D::build(World2D& world, const Humanoid2DConfig& config) {
 }
 
 // ---------------------------------------------------------------- pose
+
+void Humanoid2D::forwardKinematics(Vec2 rootPosition, Real rootAngle, const Real* jointAngles,
+                                   Vec2* linkPositions, Real* linkAngles) const {
+    std::vector<Vec2> positions(config_.links.size());
+    std::vector<Real> angles(config_.links.size(), Real(0));
+
+    positions[kPelvis] = rootPosition;
+    angles[kPelvis] = rootAngle;
+
+    for (const int jointSlot : kinematicOrder_) {
+        const JointFrame& frame = jointFrames_[static_cast<size_t>(jointSlot)];
+        const size_t parent = static_cast<size_t>(frame.parent);
+        const size_t child = static_cast<size_t>(frame.child);
+
+        const Real relative = jointAngles ? jointAngles[jointSlot] : Real(0);
+        angles[child] = angles[parent] + frame.referenceAngle + relative;
+        const Vec2 anchorWorld = positions[parent] + rotate(frame.localAnchorParent, angles[parent]);
+        positions[child] = anchorWorld - rotate(frame.localAnchorChild, angles[child]);
+    }
+
+    if (linkPositions) {
+        for (size_t i = 0; i < positions.size(); ++i) linkPositions[i] = positions[i];
+    }
+    if (linkAngles) {
+        for (size_t i = 0; i < angles.size(); ++i) linkAngles[i] = angles[i];
+    }
+}
+
+void Humanoid2D::forwardKinematicsVelocity(const Vec2* linkPositions, const Real* linkAngles,
+                                           Vec2 rootVelocity, Real rootAngularVelocity,
+                                           const Real* jointVelocities, Vec2* linkVelocities,
+                                           Real* linkAngularVelocities) const {
+    std::vector<Vec2> velocities(config_.links.size(), Vec2(0, 0));
+    std::vector<Real> angularVelocities(config_.links.size(), Real(0));
+
+    velocities[kPelvis] = rootVelocity;
+    angularVelocities[kPelvis] = rootAngularVelocity;
+
+    for (const int jointSlot : kinematicOrder_) {
+        const JointFrame& frame = jointFrames_[static_cast<size_t>(jointSlot)];
+        const size_t parent = static_cast<size_t>(frame.parent);
+        const size_t child = static_cast<size_t>(frame.child);
+
+        const Real relative = jointVelocities ? jointVelocities[jointSlot] : Real(0);
+        angularVelocities[child] = angularVelocities[parent] + relative;
+
+        // The shared anchor has one velocity; both bodies must agree on it.
+        const Vec2 anchorWorld =
+            linkPositions[parent] + rotate(frame.localAnchorParent, linkAngles[parent]);
+        const Vec2 rParent = anchorWorld - linkPositions[parent];
+        const Vec2 rChild = anchorWorld - linkPositions[child];
+        const Vec2 anchorVelocity = velocities[parent] + cross(angularVelocities[parent], rParent);
+        velocities[child] = anchorVelocity - cross(angularVelocities[child], rChild);
+    }
+
+    if (linkVelocities) {
+        for (size_t i = 0; i < velocities.size(); ++i) linkVelocities[i] = velocities[i];
+    }
+    if (linkAngularVelocities) {
+        for (size_t i = 0; i < angularVelocities.size(); ++i) {
+            linkAngularVelocities[i] = angularVelocities[i];
+        }
+    }
+}
+
+void Humanoid2D::setPoseAndVelocity(World2D& world, Vec2 rootPosition, Real rootAngle,
+                                    const Real* jointAngles, Vec2 rootVelocity,
+                                    Real rootAngularVelocity,
+                                    const Real* jointVelocities) const {
+    const size_t links = config_.links.size();
+    std::vector<Vec2> positions(links);
+    std::vector<Real> angles(links);
+    forwardKinematics(rootPosition, rootAngle, jointAngles, positions.data(), angles.data());
+
+    std::vector<Vec2> velocities(links);
+    std::vector<Real> angularVelocities(links);
+    forwardKinematicsVelocity(positions.data(), angles.data(), rootVelocity, rootAngularVelocity,
+                              jointVelocities, velocities.data(), angularVelocities.data());
+
+    for (size_t i = 0; i < links; ++i) {
+        RigidBody2D& body = link(world, static_cast<int>(i));
+        body.position = positions[i];
+        body.angle = angles[i];
+        body.velocity = velocities[i];
+        body.angularVelocity = angularVelocities[i];
+        body.clearForces();
+    }
+}
+
+Real Humanoid2D::groundedRootHeight(Real rootAngle, const Real* jointAngles) const {
+    const size_t links = config_.links.size();
+    std::vector<Vec2> positions(links);
+    std::vector<Real> angles(links);
+    forwardKinematics(Vec2(0, 0), rootAngle, jointAngles, positions.data(), angles.data());
+
+    Real lowest = std::numeric_limits<Real>::max();
+    for (size_t i = 0; i < links; ++i) {
+        const LinkConfig& link = config_.links[i];
+        // A capsule's lowest point is the lower of its two end caps.
+        const Vec2 axis = rotate(Vec2(0, link.halfLength), angles[i]);
+        const Real bottom =
+            std::min(positions[i].y + axis.y, positions[i].y - axis.y) - link.radius;
+        lowest = std::min(lowest, bottom);
+    }
+    return -lowest;
+}
 
 void Humanoid2D::setPose(World2D& world, Vec2 rootPosition, Real rootAngle,
                          const Real* jointAngles) const {

@@ -13,9 +13,36 @@
 #include "core/Rng.h"
 #include "humanoid/Observation.h"
 #include "humanoid/RewardTerms.h"
+#include "motion/Motion2D.h"
 #include "physics/World2D.h"
 
 namespace aibf {
+
+struct ImitationSettings {
+    std::string motionPath;
+    bool enabled = false;
+
+    // Reference State Initialization: start each episode at a random phase of
+    // the motion rather than always at the beginning.
+    //
+    // This is not a refinement, it is the reason acrobatic imitation works at
+    // all. Without it a policy has to master the takeoff before it ever
+    // observes the landing, so the later half of the motion receives no
+    // gradient until the earlier half is solved - and for a backflip the
+    // earlier half is only worth anything if the later half already works.
+    bool referenceStateInit = true;
+
+    // Ends an episode once RMS joint error exceeds this (radians); 0 disables.
+    // An episode that has drifted this far is not coming back, and letting it
+    // run fills the rollout with samples from states the motion never visits.
+    Real earlyTerminationPoseError = Real(0.9);
+
+    // For a non-looping clip, finishing it is a success, not a failure, so it
+    // is reported as truncation.
+    bool endEpisodeAtMotionEnd = true;
+
+    ImitationScales scales;
+};
 
 struct EnvConfig {
     // Not a default-constructed Humanoid2DConfig: that one has empty link and
@@ -59,6 +86,9 @@ struct EnvConfig {
     Real pushProbabilityPerStep = 0;
     Real pushImpulseMin = 0;
     Real pushImpulseMax = 0;
+
+    // --- imitation (M7) ---
+    ImitationSettings imitation;
 
     Real controlHz() const {
         return substepsPerControl > 0 ? physicsHz / Real(substepsPerControl) : physicsHz;
@@ -104,9 +134,16 @@ public:
     const EnvConfig& config() const { return config_; }
     Rng& rng() { return rng_; }
 
-    // Phase of the reference motion, 0 until imitation lands in M7.
+    // Phase of the reference motion; 0 when no motion is loaded.
     Real phase() const { return phase_; }
     void setPhase(Real phase) { phase_ = phase; }
+
+    bool hasMotion() const { return motionLoaded_; }
+    const Motion2D& motion() const { return motion_; }
+    // What the reference asks for at the current phase. Invalid without a clip.
+    const ImitationTargets& imitationTargets() const { return targets_; }
+    // RMS joint error against the reference, radians. Zero without a clip.
+    Real poseError() const;
 
     // Applies an impulse to the pelvis. Used by the disturbance schedule and by
     // the interactive push tool.
@@ -115,6 +152,8 @@ public:
 private:
     void evaluateTermination();
     void maybeDisturb();
+    void updateImitationTargets();
+    void applyReferenceStateInit(Real phase);
 
     EnvConfig config_;
     World2D world_;
@@ -128,6 +167,11 @@ private:
     bool truncated_ = false;
     const char* terminationReason_ = "";
     Real phase_ = 0;
+
+    Motion2D motion_;
+    bool motionLoaded_ = false;
+    Real motionTime_ = 0;
+    ImitationTargets targets_;
 };
 
 }  // namespace aibf

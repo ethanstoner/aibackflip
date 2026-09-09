@@ -1,0 +1,26 @@
+{
+  "frames": [
+    {
+      "joints": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "root_angle": 0,
+      "root_position": [0, 1],
+      "time": 0
+    },
+    {
+      "joints": [0, 0.1, 2.6, 0.1, 2.6, 0.1, 0, 0, 0, 0, 0, 0],
+      "root_angle": 0,
+      "root_position": [0, 1],
+      "time": 0.7
+    },
+    {
+      "joints": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "root_angle": 0,
+      "root_position": [0, 1],
+      "time": 1.4
+    }
+  ],
+  "interpolation": "hermite",
+  "joint_count": 12,
+  "loop": true,
+  "name": "arm_raise"
+}

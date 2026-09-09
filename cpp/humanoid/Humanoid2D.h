@@ -47,6 +47,40 @@ public:
 
     // ---- pose ----
 
+    // Forward kinematics without touching a world. Writes kLinkCount entries to
+    // each output array; either may be null.
+    //
+    // Needed because a reference pose has to be evaluated in places where there
+    // is no body to put it in: the imitation reward compares against target
+    // link positions every step, and the animator previews a pose that is not
+    // being simulated. Building a throwaway world for that would be absurd.
+    void forwardKinematics(Vec2 rootPosition, Real rootAngle, const Real* jointAngles,
+                           Vec2* linkPositions, Real* linkAngles) const;
+
+    // Velocity-level forward kinematics, given the transforms the position pass
+    // produced. Needed by reference state initialization: dropping the figure
+    // into the middle of a flip with every velocity at zero is not a state the
+    // motion ever passes through, and a policy started there has to recover
+    // from a discontinuity instead of continuing the movement.
+    void forwardKinematicsVelocity(const Vec2* linkPositions, const Real* linkAngles,
+                                   Vec2 rootVelocity, Real rootAngularVelocity,
+                                   const Real* jointVelocities, Vec2* linkVelocities,
+                                   Real* linkAngularVelocities) const;
+
+    // Places the figure at a pose *and* the matching velocities.
+    void setPoseAndVelocity(World2D& world, Vec2 rootPosition, Real rootAngle,
+                            const Real* jointAngles, Vec2 rootVelocity, Real rootAngularVelocity,
+                            const Real* jointVelocities) const;
+
+    // Root height that puts the lowest point of the figure exactly on y = 0.
+    //
+    // Authoring a crouch means choosing joint angles; the root height that goes
+    // with them is a consequence, not a free parameter. Computing it removes
+    // the most tedious and error-prone part of keyframing a ground-contact
+    // pose, and a reference that floats or intersects the floor is one no
+    // policy can track.
+    Real groundedRootHeight(Real rootAngle, const Real* jointAngles) const;
+
     // Places every link by forward kinematics from the root, so the joint
     // anchors are satisfied exactly and the solver has nothing to repair on the
     // first step. `jointAngles` is kJointCount values in joint-relative
@@ -88,9 +122,20 @@ public:
     Real worstLimitViolation(const World2D& world) const;
 
 private:
+    // The parts of a joint that forward kinematics needs, cached at build time
+    // so a pose can be evaluated without a world to read them back from.
+    struct JointFrame {
+        int parent = -1;
+        int child = -1;
+        Vec2 localAnchorParent;
+        Vec2 localAnchorChild;
+        Real referenceAngle = 0;
+    };
+
     Humanoid2DConfig config_;
     std::vector<int32_t> bodyIndices_;
     std::vector<int32_t> jointIndices_;
+    std::vector<JointFrame> jointFrames_;  // indexed by joint id
     // Joint order with parents before children, so forward kinematics is a
     // single pass. Derived at build time rather than assumed from the enum.
     std::vector<int> kinematicOrder_;

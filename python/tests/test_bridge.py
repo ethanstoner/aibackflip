@@ -34,7 +34,8 @@ def test_handshake_reports_a_self_consistent_spec(server):
         assert spec.num_envs == server.num_envs
         assert spec.action_dim == 12
         assert spec.obs_dim > 50
-        assert spec.reward_dim == 13
+        assert spec.reward_dim == len(spec.reward_names)
+        assert spec.reward_dim >= 13
         assert spec.control_hz == pytest.approx(60.0)
         assert spec.physics_hz == pytest.approx(240.0)
 

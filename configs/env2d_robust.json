@@ -1,0 +1,30 @@
+// Environment for M6: random shoves during training and a wider spread of
+// starting states. Only the fields that differ from the built-in defaults are
+// listed; everything else, including the whole humanoid definition, is
+// inherited.
+{
+  "max_episode_steps": 1000,
+
+  // Roughly twice the standing defaults. A policy that only ever starts near
+  // the rest pose learns one recovery; this makes it start from a spread of
+  // states that have to be recovered from in different ways.
+  "reset_noise": {
+    "root_angle": 0.13,
+    "root_height": 0.04,
+    "joint_angle": 0.18,
+    "linear_velocity": 0.5,
+    "angular_velocity": 0.5
+  },
+
+  // About one shove every 3.5 seconds of simulated time at 60 Hz control.
+  //
+  // The magnitude range comes from the M1 measurement that a purely
+  // pose-holding controller survives 15 N s and falls to 40: the lower end is
+  // recoverable by stiffness alone, the upper end is not recoverable without an
+  // actual balance strategy.
+  "disturbance": {
+    "probability_per_step": 0.0048,
+    "impulse_min": 12.0,
+    "impulse_max": 95.0
+  }
+}

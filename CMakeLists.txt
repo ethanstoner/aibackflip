@@ -74,6 +74,7 @@ target_link_libraries(aibf_humanoid PUBLIC aibf_physics)
 add_library(aibf_env_lib STATIC
   cpp/env/Env2D.cpp
   cpp/env/EnvBatch.cpp
+  cpp/motion/Motion2D.cpp
   cpp/net/Protocol.cpp
   cpp/net/UDPSocket.cpp
   cpp/net/EnvServer.cpp
@@ -112,6 +113,11 @@ target_link_libraries(aibf_diag PRIVATE aibf_humanoid)
 add_executable(aibf_fixture cpp/tools/protocol_fixture.cpp)
 target_link_libraries(aibf_fixture PRIVATE aibf_env_lib)
 
+# Writes starter reference motions with ground-contact heights solved by forward
+# kinematics, so a keyframed crouch actually reaches the floor.
+add_executable(aibf_motions cpp/tools/make_motions.cpp)
+target_link_libraries(aibf_motions PRIVATE aibf_env_lib)
+
 add_executable(aibf_env cpp/tools/envserver.cpp)
 target_link_libraries(aibf_env PRIVATE aibf_env_lib aibf_engine)
 target_compile_definitions(aibf_env PRIVATE AIBF_WITH_RENDERER)
@@ -127,6 +133,7 @@ add_executable(aibf_tests
   cpp/tests/test_motors.cpp
   cpp/tests/test_protocol.cpp
   cpp/tests/test_env.cpp
+  cpp/tests/test_motion.cpp
 )
 target_link_libraries(aibf_tests PRIVATE aibf_env_lib)
 

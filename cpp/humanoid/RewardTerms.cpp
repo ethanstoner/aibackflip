@@ -7,12 +7,26 @@ namespace aibf {
 
 const std::vector<std::string>& rewardTermNames() {
     static const std::vector<std::string> kNames = {
-        "alive",         "pelvis_height",       "head_height",      "chest_upright",
-        "head_upright",  "com_over_support",    "foot_contact",     "horizontal_drift_cost",
-        "vertical_drift_cost", "angular_drift_cost", "action_cost",  "torque_cost",
+        "alive",
+        "pelvis_height",
+        "head_height",
+        "chest_upright",
+        "head_upright",
+        "com_over_support",
+        "foot_contact",
+        "horizontal_drift_cost",
+        "vertical_drift_cost",
+        "angular_drift_cost",
+        "action_cost",
+        "torque_cost",
         "joint_limit_cost",
+        "pose_match",
+        "joint_velocity_match",
+        "end_effector_match",
+        "root_match",
+        "com_match",
     };
-    static_assert(kTermCount == 13, "reward term names must match the enum");
+    static_assert(kTermCount == 18, "reward term names must match the enum");
     return kNames;
 }
 
@@ -105,6 +119,83 @@ void writeRewardTerms(const World2D& world, const Humanoid2D& figure,
     out[kTermTorqueCost] = torqueCost / Real(kJointCount);
 
     out[kTermJointLimitCost] = figure.worstLimitViolation(world);
+
+    // Zero unless a reference motion fills them in; writeImitationTerms is a
+    // separate call because only the imitation environment has the targets.
+    for (int t = kTermPoseMatch; t < kTermCount; ++t) out[t] = Real(0);
+}
+
+Real poseTrackingError(const World2D& world, const Humanoid2D& figure,
+                       const ImitationTargets& targets) {
+    if (!targets.valid || targets.jointAngles.size() != static_cast<size_t>(kJointCount)) {
+        return Real(0);
+    }
+    Real sum = 0;
+    for (int j = 0; j < kJointCount; ++j) {
+        const Real error =
+            wrapAngle(figure.jointAngle(world, j) - targets.jointAngles[static_cast<size_t>(j)]);
+        sum += error * error;
+    }
+    return std::sqrt(sum / Real(kJointCount));
+}
+
+void writeImitationTerms(const World2D& world, const Humanoid2D& figure,
+                         const ImitationTargets& targets, const ImitationScales& scales,
+                         const ObservationScales& observationScales, Real* out) {
+    for (int t = kTermPoseMatch; t < kTermCount; ++t) out[t] = Real(0);
+    if (!targets.valid) return;
+
+    const RigidBody2D& pelvis = figure.link(world, kPelvis);
+
+    // ---- pose ----
+    Real poseError = 0;
+    for (int j = 0; j < kJointCount; ++j) {
+        // Wrapped, so a joint sitting near +/-pi does not read as a 2pi error.
+        const Real error =
+            wrapAngle(figure.jointAngle(world, j) - targets.jointAngles[static_cast<size_t>(j)]);
+        poseError += error * error;
+    }
+    out[kTermPoseMatch] = std::exp(-scales.pose * poseError);
+
+    // ---- joint velocity ----
+    Real velocityError = 0;
+    for (int j = 0; j < kJointCount; ++j) {
+        const Real error =
+            figure.jointVelocity(world, j) - targets.jointVelocities[static_cast<size_t>(j)];
+        velocityError += error * error;
+    }
+    out[kTermJointVelocityMatch] = std::exp(-scales.jointVelocity * velocityError);
+
+    // ---- end effectors ----
+    //
+    // Compared relative to the root. Absolute positions would fold the root
+    // tracking error into this term as well, double-counting it and making the
+    // two terms impossible to read apart in the logs.
+    Real endEffectorError = 0;
+    const size_t effectorCount =
+        std::min(targets.endEffectors.size(), sizeof(kEndEffectors) / sizeof(kEndEffectors[0]));
+    for (size_t e = 0; e < effectorCount; ++e) {
+        const Vec2 actual = figure.link(world, kEndEffectors[e]).position - pelvis.position;
+        endEffectorError += lengthSq(actual - targets.endEffectors[e]);
+    }
+    out[kTermEndEffectorMatch] = std::exp(-scales.endEffector * endEffectorError);
+
+    // ---- root ----
+    //
+    // Height and orientation only. Horizontal position is deliberately excluded:
+    // the observation hides absolute X, so demanding the figure be at a
+    // particular X would be asking it to track something it cannot see.
+    const Real heightError = pelvis.position.y - targets.rootHeight;
+    const Real angleError = wrapAngle(pelvis.angle - targets.rootAngle);
+    const Real rootError =
+        heightError * heightError + scales.rootAngleWeight * angleError * angleError;
+    out[kTermRootMatch] = std::exp(-scales.root * rootError);
+
+    // ---- centre of mass ----
+    const Vec2 comOffset = figure.centerOfMass(world) - pelvis.position;
+    out[kTermComMatch] = std::exp(-scales.com * lengthSq(comOffset - targets.comOffset));
+
+    (void)observationScales;
 }
 
 }  // namespace aibf

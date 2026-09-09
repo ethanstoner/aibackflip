@@ -1,10 +1,10 @@
-// Imitation environment for the "forward_roll" reference motion.
+// Imitation environment for the "backflip" reference motion.
 //
 // Reference State Initialization is on: each episode starts at a random phase
 // of the clip, with the velocities that belong to that phase. Without it the
 // policy must master the opening before it ever observes the ending.
 {
-  "max_episode_steps": 200,
+  "max_episode_steps": 130,
 
   "reset_noise": {
     "root_angle": 0.05,
@@ -37,9 +37,9 @@
   },
 
   "imitation": {
-    "motion": "motions/forward_roll.json",
+    "motion": "motions/backflip.json",
     "enabled": true,
-    "reference_state_init": true,
+    "reference_state_init": false,
 
     // Joint deviation ends an episode that is not coming back.
     "early_termination_pose_error": 1,
@@ -49,7 +49,7 @@
     // back can hold the reference pose perfectly - the first squat policy
     // trained here did exactly that, scoring pose_match 0.855 while flat on the
     // ground with its feet in the air.
-    "early_termination_root_error": 0.5,
+    "early_termination_root_error": 0.6,
 
     "end_episode_at_motion_end": true,
 

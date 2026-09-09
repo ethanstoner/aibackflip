@@ -754,3 +754,102 @@ trainer is stepping, so what is being poked is the same simulation being learned
 ### Next
 
 M7 — train the imitation stack, starting with arm-raise and squat, before anything acrobatic.
+
+---
+
+## M7 — imitation learning
+
+**Status:** in progress. Squat trained and verified; arm-raise, jump and backflip training.
+
+### Built
+
+- **`Motion2D`** — keyframe clips, cubic Hermite interpolation, JSON. Root angle stored
+  unwrapped so a flip can say "-6.28 radians" and mean one revolution.
+- **Five DeepMimic-style tracking terms** — pose, joint velocity, end effector, root, centre of
+  mass. Each an exponential of a squared error.
+- **Reference State Initialization** — episodes start at a random phase with the velocities
+  belonging to it.
+- **`aibf_animator`** — timeline, keyframing, onion skin, `g` to drop a pose onto the floor,
+  `p` for a physics preview.
+- **`aibf_motions`** — generates starter clips with ground-contact heights solved by FK.
+
+### The squat policy was cheating, and the logs said so
+
+The first run scored `pose_match` **0.855**, which reads as good tracking. Rendered, it was
+**lying flat on its back**, feet in the air, making squat-shaped leg motions on the ground.
+
+The mechanism generalises and is worth stating: **joint angles are root-relative.** A fallen
+figure can hold the reference pose exactly. Early termination measured only joint error, so the
+episode never ended; `root_match` did flag it at 0.368, but at weight 0.15 against `pose_match`
+at 0.65 it was cheaper to ignore than to fix.
+
+The fix is a termination, not a weight. `early_termination_root_error` ends an episode once the
+root has drifted from the reference in height or orientation — nothing else distinguishes
+"squatting" from "lying down making squat-shaped motions". The weight went 0.15 → 0.5 as well.
+
+After the fix:
+
+| term | before | after |
+|---|---|---|
+| `root_match` | 0.368 | **0.938** |
+| `com_match` | 0.938 | **0.998** |
+| `pose_match` | 0.855 | 0.580 |
+| mean pelvis height | 0.582 | **0.876** of rest |
+| episodes completing the clip | 32/32 | 31/32 |
+
+`pose_match` **falling** is the honest direction. The 0.855 was earned by a policy on the
+ground; 0.580 is what tracking looks like while actually upright. Rendered and inspected: a real
+squat — torso forward, knees bent, both feet planted, arms out as counterbalance, pelvis cycling
+1.007 → 0.718 → 1.007.
+
+### Two reward terms were dead
+
+`joint_velocity_match` read exactly **0.000** for a policy visibly performing the motion, and
+`end_effector_match` sat at 0.23. Both scales came from DeepMimic and are wrong for this figure.
+A term pinned against an end of its range contributes no gradient at all, so it is not a weak
+signal — it is no signal. Retuned (`joint_velocity` 0.1 → 0.01, `end_effector` 40 → 15) to put a
+working policy mid-range with room to improve.
+
+### The damping ceiling
+
+The animator's physics preview could not get the figure off the ground for a backflip.
+`aibf_diag bandwidth` explains why: tracking bandwidth is `kp/kd`, and at the standing default of
+`kp/10` the knee reaches only **47%** of a commanded 3 Hz swing. A backflip tuck sweeps the knee
+at roughly 17 rad/s. The reference was untrackable at those gains no matter how long training
+ran, and the symptom would have looked like a learning failure.
+
+| kp/kd | 1 Hz | 2 Hz | 3 Hz | 4 Hz |
+|---|---|---|---|---|
+| 10 (standing default) | 0.85 | 0.63 | 0.47 | 0.38 |
+| 30 | 0.98 | 0.94 | 0.87 | 0.79 |
+| **50 (imitation)** | **1.00** | **0.99** | **0.97** | **0.94** |
+
+No instability or velocity clamping at any setting. With `kp/50`, the pure PD preview — no
+learning at all — leaves the ground and completes most of a backflip, pelvis reaching 1.79 m
+where it previously ended face-down at 0.11. That establishes the reference is feasible, which
+is the question the preview exists to answer.
+
+### Throughput, and a correction
+
+An earlier reading of the profile was wrong. Comparing a random-action agent (34k steps/s) to
+training (10k) and blaming the update ignored that the random agent runs no policy — the network
+forward pass happens **inside** the rollout. The instrumented split is `sim 0.15s + learn 0.03s`:
+simulation is ~80% of wall time, not 20%.
+
+The lever that follows is environment count, since the per-control-step overhead is largely
+independent of it:
+
+| environments | throughput |
+|---|---|
+| 32 | 10,963 steps/s |
+| **64** | **15,682 (+43%)** |
+| 96 | 17,264 (+57%, diminishing) |
+
+The machine has 32 logical cores, so motions now train concurrently rather than in sequence.
+
+### Known issues
+
+- `pose_match` at 0.580 is loose. Whether that is the gain ceiling, the reward balance, or
+  simply undertraining has not been separated.
+- Root-error thresholds are hand-set per motion (0.35 standing, 0.45 jump, 0.60 backflip),
+  scaled by how far each motion's root actually travels. Principled, but not derived.

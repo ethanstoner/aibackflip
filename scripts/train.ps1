@@ -17,7 +17,12 @@ param(
     [long]$Steps = 0,
     [int]$Seed = 1,
     [string]$Resume = "",
-    [int]$LogEvery = 10
+    [int]$LogEvery = 10,
+    # Opens a window showing one environment while it trains. Costs throughput,
+    # because serving and drawing share a thread - useful for seeing what a
+    # policy is doing, not for a run you want finished quickly.
+    [switch]$Render,
+    [int]$RenderEnv = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,7 +33,13 @@ $Python = Join-Path $Root "venv\Scripts\python.exe"
 if (-not (Test-Path $EnvExe)) { throw "missing $EnvExe - run scripts\build.ps1" }
 if (-not (Test-Path $Python)) { $Python = "python" }
 
-$serverArgs = @("--headless", "--quiet", "--port", "$Port", "--envs", "$Envs", "--seed", "$Seed")
+$serverArgs = @("--quiet", "--port", "$Port", "--envs", "$Envs", "--seed", "$Seed")
+if ($Render) {
+    $serverArgs += @("--render", "--render-env", "$RenderEnv")
+    Write-Host "rendering environment $RenderEnv (x/z shove, b throws a ball, mouse drags)" -ForegroundColor Yellow
+} else {
+    $serverArgs += "--headless"
+}
 if ($EnvConfig -ne "") {
     $envConfigPath = if (Test-Path $EnvConfig) { $EnvConfig } else { Join-Path $Root $EnvConfig }
     if (-not (Test-Path $envConfigPath)) { throw "no such environment config: $EnvConfig" }
@@ -40,8 +51,9 @@ Write-Host "starting the environment server on port $Port with $Envs environment
 # Launched from the repo root so relative paths inside an environment config -
 # a motion clip, most importantly - resolve the same way regardless of where
 # this script was invoked from.
+$windowStyle = if ($Render) { "Normal" } else { "Hidden" }
 $server = Start-Process -FilePath $EnvExe -ArgumentList $serverArgs -PassThru `
-    -WindowStyle Hidden -WorkingDirectory $Root
+    -WindowStyle $windowStyle -WorkingDirectory $Root
 Start-Sleep -Milliseconds 800
 
 if ($server.HasExited) { throw "the environment server exited immediately" }

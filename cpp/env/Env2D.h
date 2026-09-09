@@ -37,6 +37,18 @@ struct ImitationSettings {
     // run fills the rollout with samples from states the motion never visits.
     Real earlyTerminationPoseError = Real(0.9);
 
+    // Ends an episode once the *root* has drifted this far from the reference,
+    // as sqrt(dHeight^2 + rootAngleWeight * dAngle^2) in metres; 0 disables.
+    //
+    // This is not a refinement of the pose test, it is what makes imitation
+    // mean anything. Joint angles are root-relative, so a figure lying flat on
+    // its back can hold exactly the reference pose - and the first squat policy
+    // trained here did precisely that, reaching pose_match 0.855 while on the
+    // ground with its feet in the air. Nothing in the joint-angle reward or the
+    // pose-error termination distinguishes "squatting" from "lying down making
+    // squat-shaped leg motions".
+    Real earlyTerminationRootError = Real(0.35);
+
     // For a non-looping clip, finishing it is a success, not a failure, so it
     // is reported as truncation.
     bool endEpisodeAtMotionEnd = true;
@@ -151,6 +163,8 @@ public:
     const ImitationTargets& imitationTargets() const { return targets_; }
     // RMS joint error against the reference, radians. Zero without a clip.
     Real poseError() const;
+    // Root deviation from the reference: height and orientation combined.
+    Real rootError() const;
 
     // Applies an impulse to the pelvis. Used by the disturbance schedule and by
     // the interactive push tool.

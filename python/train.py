@@ -198,6 +198,11 @@ def main() -> int:
             buffer.reset()
             term_sums = np.zeros(spec.reward_dim, dtype=np.float64)
             raw_reward_sum = 0.0
+            # Split the wall clock between simulating and learning. Without it,
+            # "training is slow" is unactionable - the fix for a rollout-bound
+            # run (more environments) is the opposite of the fix for an
+            # update-bound one (bigger minibatches, fewer epochs).
+            rollout_started = time.perf_counter()
 
             for _ in range(config.rollout_steps):
                 with torch.no_grad():
@@ -256,6 +261,9 @@ def main() -> int:
                 )
                 env_steps += config.num_envs
 
+            rollout_seconds = time.perf_counter() - rollout_started
+
+            update_started = time.perf_counter()
             with torch.no_grad():
                 last_values = policy.value(torch.as_tensor(obs, device=device)).cpu().numpy()
 
@@ -264,6 +272,7 @@ def main() -> int:
             )
             batch = buffer.to_batch(advantages, returns, device=device)
             stats = ppo.update(batch)
+            update_seconds = time.perf_counter() - update_started
 
             variance_explained = explained_variance(buffer.values, returns)
             elapsed = time.perf_counter() - started
@@ -285,6 +294,12 @@ def main() -> int:
                 writer.add_scalar("train/epochs_run", stats.epochs_run, env_steps)
                 writer.add_scalar("train/action_std", float(policy.current_std().mean()), env_steps)
                 writer.add_scalar("perf/env_steps_per_second", env_steps / max(elapsed, 1e-9), env_steps)
+                writer.add_scalar("perf/rollout_seconds", rollout_seconds, env_steps)
+                writer.add_scalar("perf/update_seconds", update_seconds, env_steps)
+                writer.add_scalar(
+                    "perf/update_fraction",
+                    update_seconds / max(rollout_seconds + update_seconds, 1e-9), env_steps
+                )
                 # Per-component reward means. A policy that has found an exploit
                 # shows one of these saturating while the rest flatline, which is
                 # invisible in the scalar reward.
@@ -301,7 +316,9 @@ def main() -> int:
                     f"clip {stats.clip_fraction:.3f}  "
                     f"ev {variance_explained:+.3f}  "
                     f"ent {stats.entropy:+.2f}  "
-                    f"{env_steps / max(elapsed, 1e-9):7.0f} steps/s"
+                    f"{env_steps / max(elapsed, 1e-9):7.0f} steps/s  "
+                    f"(sim {rollout_seconds:.2f}s + learn {update_seconds:.2f}s, "
+                    f"{stats.epochs_run}ep)"
                     + ("  [kl stop]" if stats.stopped_early else "")
                 )
 

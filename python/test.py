@@ -82,6 +82,8 @@ def main() -> int:
     lengths: list[int] = []
     reasons: Counter[str] = Counter()
     peak_pelvis: list[float] = []
+    term_sums = np.zeros(spec.reward_dim, dtype=np.float64)
+    term_steps = 0
 
     pelvis_index = spec.observation_names.index("pelvis_height")
     step = 0
@@ -93,6 +95,8 @@ def main() -> int:
             )
         raw_obs, rewards, terminated, truncated, info = env.step(actions.cpu().numpy())
         peak_pelvis.append(float(raw_obs[:, pelvis_index].mean()))
+        term_sums += info["reward_terms"].mean(axis=0)
+        term_steps += 1
 
         for episode in info["episodes"]:
             returns.append(episode.ret)
@@ -114,6 +118,26 @@ def main() -> int:
           f"max {np.max(lengths):8d}   ({np.mean(lengths) / spec.control_hz:.1f}s)")
     print(f"  survived to the time limit: {reasons['time limit']}/{len(returns)}")
     print(f"  mean pelvis height while running: {np.mean(peak_pelvis):.3f} of rest height")
+
+    if term_steps:
+        means = term_sums / term_steps
+        tracking = {
+            name: value
+            for name, value in zip(spec.reward_names, means)
+            if name.endswith("_match")
+        }
+        # Only meaningful when a reference motion is loaded; without one every
+        # tracking term is identically zero and printing them is noise.
+        if tracking and max(tracking.values()) > 0.0:
+            print("\n  imitation tracking (1.0 = exactly on the reference)")
+            for name, value in tracking.items():
+                bar = "#" * int(round(value * 30))
+                print(f"    {name:<22}{value:6.3f}  {bar}")
+            # A one-shot clip that is being tracked to the end shows up as
+            # every episode ending in truncation rather than termination.
+            completed = reasons["time limit"]
+            print(f"\n  episodes that reached the end of the clip: "
+                  f"{completed}/{len(returns)}")
     return 0
 
 

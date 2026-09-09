@@ -52,6 +52,8 @@ EnvConfig EnvConfig::fromJson(const Json& json) {
             imitation["reference_state_init"].boolean(settings.referenceStateInit);
         settings.earlyTerminationPoseError =
             imitation["early_termination_pose_error"].real(settings.earlyTerminationPoseError);
+        settings.earlyTerminationRootError =
+            imitation["early_termination_root_error"].real(settings.earlyTerminationRootError);
         settings.endEpisodeAtMotionEnd =
             imitation["end_episode_at_motion_end"].boolean(settings.endEpisodeAtMotionEnd);
 
@@ -120,6 +122,8 @@ Json EnvConfig::toJson() const {
     imitationJson.set("reference_state_init", Json(imitation.referenceStateInit));
     imitationJson.set("early_termination_pose_error",
                       Json(double(imitation.earlyTerminationPoseError)));
+    imitationJson.set("early_termination_root_error",
+                      Json(double(imitation.earlyTerminationRootError)));
     imitationJson.set("end_episode_at_motion_end", Json(imitation.endEpisodeAtMotionEnd));
     Json scalesJson = Json::object();
     scalesJson.set("pose", Json(double(imitation.scales.pose)));
@@ -297,6 +301,17 @@ Real Env2D::poseError() const {
     return targets_.valid ? poseTrackingError(world_, figure_, targets_) : Real(0);
 }
 
+Real Env2D::rootError() const {
+    if (!targets_.valid) return Real(0);
+    const RigidBody2D& pelvis = figure_.link(world_, kPelvis);
+    const Real heightError = pelvis.position.y - targets_.rootHeight;
+    const Real angleError = wrapAngle(pelvis.angle - targets_.rootAngle);
+    // Same combination the root reward term uses, so the two agree about what
+    // "off the reference" means.
+    return std::sqrt(heightError * heightError +
+                     config_.imitation.scales.rootAngleWeight * angleError * angleError);
+}
+
 void Env2D::step(const Real* actions, int count) {
     if (done()) return;
 
@@ -375,6 +390,15 @@ void Env2D::evaluateTermination() {
             poseError() > config_.imitation.earlyTerminationPoseError) {
             terminated_ = true;
             terminationReason_ = "lost_the_motion";
+            return;
+        }
+        // Checked separately from the joint pose, because joint angles are
+        // root-relative and a figure on the ground can hold the reference pose
+        // perfectly while doing nothing the motion describes.
+        if (config_.imitation.earlyTerminationRootError > Real(0) &&
+            rootError() > config_.imitation.earlyTerminationRootError) {
+            terminated_ = true;
+            terminationReason_ = "root_off_reference";
             return;
         }
         if (config_.imitation.endEpisodeAtMotionEnd && !motion_.loop &&

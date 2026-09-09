@@ -3,14 +3,9 @@
 // Reference State Initialization is on: each episode starts at a random phase
 // of the clip, with the velocities that belong to that phase. Without it the
 // policy must master the opening before it ever observes the ending.
-//
-// Episodes end early once RMS joint error exceeds the threshold. An episode
-// that has drifted that far is not recovering, and letting it run fills the
-// rollout with states the motion never visits.
 {
   "max_episode_steps": 180,
 
-  // Perturbation around the reference rather than around a rest pose.
   "reset_noise": {
     "root_angle": 0.05,
     "root_height": 0.02,
@@ -20,17 +15,10 @@
   },
 
   // Damping lowered from the standing default of kd = kp/10 to kd = kp/50.
-  //
-  // For a spring-damper the tracking corner frequency is kp/kd, so that ratio
-  // is the bandwidth in rad/s. Measured (aibf_diag bandwidth): at kp/10 the
-  // knee reaches only 47% of a commanded 3 Hz swing; at kp/50 it reaches 97%,
-  // with no instability at any setting tried. A backflip tuck sweeps the knee
-  // at roughly 17 rad/s, so the standing gains simply cannot follow it - the
-  // reference would be untrackable no matter how long training ran, and the
-  // symptom would look like a learning failure rather than a gain problem.
-  //
-  // The standing and push-recovery policies keep the original damping; nothing
-  // here changes those.
+  // Tracking bandwidth is kp/kd, and measured (aibf_diag bandwidth) the knee
+  // reaches 47% of a commanded 3 Hz swing at kp/10 against 97% at kp/50. A
+  // backflip tuck sweeps the knee at roughly 17 rad/s, so the standing gains
+  // simply cannot follow it.
   "humanoid": {
     "joints": [
       {"name": "waist",      "kd": 80},
@@ -52,7 +40,32 @@
     "motion": "motions/arm_raise.json",
     "enabled": true,
     "reference_state_init": true,
+
+    // Joint deviation ends an episode that is not coming back.
     "early_termination_pose_error": 0.7,
-    "end_episode_at_motion_end": true
+
+    // Root deviation ends one that is tracking the joints while doing something
+    // else entirely. Joint angles are root-relative, so a figure lying on its
+    // back can hold the reference pose perfectly - the first squat policy
+    // trained here did exactly that, scoring pose_match 0.855 while flat on the
+    // ground with its feet in the air.
+    "early_termination_root_error": 0.35,
+
+    "end_episode_at_motion_end": true,
+
+    // Falloff rates, retuned from DeepMimic's after measuring what a working
+    // policy actually achieves. A term is only useful where it has gradient:
+    // at the original joint_velocity rate of 0.1 the term read exactly 0.000
+    // for a policy that was visibly performing the motion, so it contributed
+    // nothing at all. These put a good policy in the middle of the range with
+    // room to improve rather than pinned against an end of it.
+    "scales": {
+      "pose": 2.0,
+      "joint_velocity": 0.01,
+      "end_effector": 15.0,
+      "root": 20.0,
+      "com": 10.0,
+      "root_angle_weight": 0.5
+    }
   }
 }

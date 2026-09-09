@@ -640,6 +640,71 @@ TEST(Imitation, aLostMotionTerminatesAndFinishingItTruncates) {
     }
 }
 
+TEST(Imitation, aFallenFigureIsTerminatedEvenWhenItsJointAnglesAreRight) {
+    // The failure this exists to prevent, reproduced directly.
+    //
+    // Joint angles are root-relative, so a figure lying flat on its back can
+    // hold the reference pose exactly. The first squat policy trained here
+    // exploited that: pose_match 0.855 while on the ground with its feet in the
+    // air, because nothing in the joint-angle reward or the pose-error
+    // termination could tell the two apart. The root test is what can.
+    World2D scratchWorld;
+    Humanoid2D scratchFigure;
+    scratchFigure.build(scratchWorld, Humanoid2DConfig::defaults());
+
+    EnvConfig config;
+    config.maxEpisodeSteps = 400;
+    config.resetNoise = ResetNoise{};
+    config.imitation.enabled = true;
+    config.imitation.motionPath = writeTestClip(scratchFigure);
+    config.imitation.referenceStateInit = false;
+    config.imitation.earlyTerminationPoseError = 0;  // joints are fine, on purpose
+    config.imitation.earlyTerminationRootError = Real(0.35);
+
+    Env2D env;
+    env.initialize(config, 9);
+    env.reset();
+
+    // Put the figure on its back while holding the reference joint angles.
+    const ImitationTargets& targets = env.imitationTargets();
+    std::vector<Real> angles = targets.jointAngles;
+    env.figure().setPose(env.world(), Vec2(0, Real(0.15)), kHalfPi, angles.data());
+    env.world().refreshContacts();
+
+    // The joint pose still matches, so the pose test alone would be satisfied.
+    CHECK(env.poseError() < Real(0.05));
+    // But the root has plainly left the reference.
+    CHECK(env.rootError() > Real(0.35));
+
+    const std::vector<Real> zeros(Env2D::actionDim(), Real(0));
+    env.step(zeros.data(), Env2D::actionDim());
+    CHECK(env.terminated());
+    CHECK(std::string(env.terminationReason()) == "root_off_reference");
+}
+
+TEST(Imitation, aFigureOnTheReferenceIsNotTerminatedByTheRootTest) {
+    World2D scratchWorld;
+    Humanoid2D scratchFigure;
+    scratchFigure.build(scratchWorld, Humanoid2DConfig::defaults());
+
+    EnvConfig config;
+    config.maxEpisodeSteps = 30;
+    config.resetNoise = ResetNoise{};
+    config.imitation.enabled = true;
+    config.imitation.motionPath = writeTestClip(scratchFigure);
+    config.imitation.earlyTerminationRootError = Real(0.35);
+
+    Env2D env;
+    env.initialize(config, 6);
+    for (int trial = 0; trial < 10; ++trial) {
+        env.reset();
+        // Straight after reference state initialization the root is on the
+        // reference by construction, so the test must not fire.
+        CHECK(env.rootError() < Real(0.05));
+        CHECK(!env.terminated());
+    }
+}
+
 TEST(Imitation, posturalTerminationsAreDisabledWhileImitating) {
     // Halfway through a backflip the figure is upside down at knee height, which
     // pelvis_low, head_low and chest_fallen would all call a failure. Only
@@ -668,7 +733,12 @@ TEST(Imitation, posturalTerminationsAreDisabledWhileImitating) {
     config.imitation.enabled = true;
     config.imitation.motionPath = invertedPath;
     config.imitation.referenceStateInit = false;
+    // Both imitation terminations off, so this isolates the one thing it is
+    // about: that the *postural* tests stay disabled. A zero policy cannot
+    // follow an inverting clip, so leaving the root test on would end the
+    // episode for an unrelated and entirely correct reason.
     config.imitation.earlyTerminationPoseError = 0;
+    config.imitation.earlyTerminationRootError = 0;
 
     Env2D env;
     env.initialize(config, 1);
@@ -677,9 +747,7 @@ TEST(Imitation, posturalTerminationsAreDisabledWhileImitating) {
 
     // It ran to the time limit despite being low and inverted throughout.
     CHECK(env.truncated());
-    CHECK(std::string(env.terminationReason()) != "pelvis_low");
-    CHECK(std::string(env.terminationReason()) != "chest_fallen");
-    CHECK(std::string(env.terminationReason()) != "head_low");
+    CHECK(std::string(env.terminationReason()) == "time_limit");
 }
 
 // ---------------------------------------------------------------- batch

@@ -82,6 +82,7 @@ add_library(aibf_env_lib STATIC
   cpp/env/Env2D.cpp
   cpp/env/Env3D.cpp
   cpp/motion/Motion2D.cpp
+  cpp/motion/Motion3D.cpp
   cpp/net/Protocol.cpp
   cpp/net/UDPSocket.cpp
 )
@@ -98,6 +99,7 @@ add_library(aibf_engine STATIC
   cpp/engine/GL.cpp
   cpp/engine/Window.cpp
   cpp/engine/Renderer2D.cpp
+  cpp/engine/Renderer3D.cpp
   cpp/engine/DebugDraw.cpp
 )
 target_link_libraries(aibf_engine PUBLIC aibf_humanoid glfw OpenGL::GL)
@@ -148,6 +150,7 @@ add_executable(aibf_tests
   cpp/tests/test_collision3d.cpp
   cpp/tests/test_joints3d.cpp
   cpp/tests/test_humanoid3d.cpp
+  cpp/tests/test_motion3d.cpp
 )
 target_link_libraries(aibf_tests PRIVATE aibf_env_lib)
 

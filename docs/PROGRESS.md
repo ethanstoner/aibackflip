@@ -926,8 +926,51 @@ gets ignored, and only a termination changes behaviour.** The squat's `root_matc
 while the figure lay on its back; the jump's peak height was missed while the average looked
 fine. In both cases raising a weight was the tempting fix and the termination was the real one.
 
+### The jump, retrained
+
+Threshold 0.45 → 0.15, nothing else changed:
+
+| | before | after |
+|---|---|---|
+| Crouch depth | 1.016 (barely) | **0.784** |
+| Peak pelvis | 1.069 | **1.368** (reference asks 1.33) |
+| Airborne | never — feet down at peak | **25+ steps clear of the ground** |
+| `root_match` | 0.890 | 0.955 |
+
+Rendered and inspected: unambiguously airborne, both feet well clear, body extended. A single
+termination threshold was the whole difference between a gesture and a jump.
+
+### The forward roll
+
+24/24 episodes complete the clip. Accumulated rotation **−360°** across 16 episodes
+(range −356 to −365) — negative being forward for a figure facing +X, the mirror of the
+backflip's +360°. Rendered mid-roll: head down near the ground, body rotating over the top.
+
+The pelvis trace tells the same story: 1.020 standing → 0.245 inverted → 0.757 recovering.
+
+### All five 2D motions
+
+| motion | verified by | result |
+|---|---|---|
+| arm raise | tracking terms + render | `pose_match` 0.861, `root_match` 0.987, 24/24 |
+| squat | tracking terms + render | `root_match` 0.938, pelvis cycling 1.007 → 0.718 |
+| jump | height and contact trace + render | 1.368 m peak, genuinely airborne |
+| forward roll | unwrapped rotation + render | −360°, 24/24 complete |
+| **backflip** | unwrapped rotation + render | **+360°, 20/20, 0.72 s airborne** |
+
 ### Not attempted
 
 A **cartwheel** is a frontal-plane motion. A sagittal 2D figure has no frontal plane, so it
 cannot be represented here at all — it is not a hard case, it is an impossible one. It waits for
 the 3D humanoid.
+
+### Honest limits on all of this
+
+- **Tracking is loose on the acrobatic motions.** `pose_match` runs 0.08–0.20 for jump, roll and
+  backflip against 0.86 for arm raise. The policies match the *trajectory* — the root's path
+  through space — and improvise the limbs. Whether tighter tracking needs more training, gentler
+  falloffs, or a more physically achievable reference has not been separated.
+- Every "N/N" figure above comes from a deterministic policy. Stochastic sampling was not swept.
+- The verification scripts written for this were throwaway and one had a sign bug: the rotation
+  check only counted positive rotation, so it reported 0/16 for the forward roll's clean −360°.
+  Corrected by reading the numbers, not the verdict.

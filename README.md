@@ -9,10 +9,10 @@ Every frame above is simulated. There is no animation playback, no inverse kinem
 scripted trajectory. A neural network reads joint angles and contacts at 60 Hz and outputs
 twelve motor targets, and the rigid-body solver does the rest.
 
-| | | |
-|---|---|---|
-| ![forward roll](docs/media/roll.gif) | ![jump](docs/media/jump.gif) | ![push recovery](docs/media/push.gif) |
-| forward roll, -360 deg | vertical jump | recovering from a 135 N.s shove |
+| | | | |
+|---|---|---|---|
+| ![forward roll](docs/media/roll.gif) | ![jump](docs/media/jump.gif) | ![push recovery](docs/media/push.gif) | ![shoved mid-flip](docs/media/shoved.gif) |
+| forward roll, -360 deg | vertical jump | recovering from a 135 N.s shove | hit with 300 N.s at the apex |
 
 ## What it does, measured
 
@@ -25,6 +25,7 @@ Every number below comes from a script in this repo, run against a checkpoint in
 | Push recovery | absorbs 13 shoves an episode at **115 N.s**, falls at 145 (one every 45 steps) | `python/push_test.py` |
 | Backflip | **+358 deg** mean rotation, 24/24 complete, 0.71 s airborne, peak height 1.66x rest | `python/flight_test.py` |
 | Backflip under a mid-air shove | lands the flip **83% of the time at 200 N.s**, 100% up to 100 N.s | `python/flight_test.py` |
+| Same, after training against shoves | **44% at 400 N.s** against 12%, costing 6 points at zero disturbance (96 episodes) | `python/flight_test.py` |
 | Forward roll | **-360 deg**, 24/24 complete | `python/flight_test.py` |
 | Jump | peak height 1.27x rest, 0.43 s with both feet clear of the ground | `python/flight_test.py` |
 
@@ -71,7 +72,7 @@ Design rationale in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); the wire for
 [`docs/PROTOCOL.md`](docs/PROTOCOL.md); the observation layout in
 [`docs/OBSERVATIONS.md`](docs/OBSERVATIONS.md).
 
-## Three things that were harder than expected
+## Four things that were harder than expected
 
 **A reward term that flags a problem changes nothing. Only a termination does.** This happened
 three separate times. The squat policy lay on its back doing squat-shaped leg motions, because
@@ -93,6 +94,14 @@ task, with no motion clip and the wrong motor gains, and the "survival rate" was
 episodes that ran to a time limit doing nothing. `flight_test.py` now carries a witness column
 measuring the actual jump in angular velocity across the shove, and refuses to report a
 robustness result when that column is flat.
+
+**Robustness is bought, not found.** Fine-tuning the backflip against random off-centre shoves
+more than triples completion at 400 N.s, from 12% to 44% over 96 episodes. It also makes the
+policy a worse backflip: 94% at zero disturbance against 100%, and 349 degrees of rotation
+against 357. Training against a gentler range (20-150 N.s rather than 40-260) gives up nearly
+all of the robustness while still paying most of the cost, so there is no setting in between
+that avoids the trade. Both checkpoints are kept, and the undisturbed one is the flip in the GIF
+at the top, because it is the better flip.
 
 ## Build and run
 

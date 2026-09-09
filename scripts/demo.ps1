@@ -37,7 +37,11 @@ $demos = @(
     @{ name = "backflip";  model = "checkpoints\imit_backflip_best.pt"; config = "configs\env2d_backflip_capture.json" },
     @{ name = "roll";      model = "checkpoints\imit_roll_best.pt";     config = "configs\env2d_forward_roll_capture.json" },
     @{ name = "jump";      model = "checkpoints\imit_jump_v2_best.pt";  config = "configs\env2d_jump_capture.json" },
-    @{ name = "push";      model = "checkpoints\robust_v1_best.pt";     config = "configs\env2d_push_demo.json" }
+    @{ name = "push";      model = "checkpoints\robust_v1_best.pt";     config = "configs\env2d_push_demo.json" },
+    # The shove-trained policy, taking a 300 N.s hit at the apex. Deliberately
+    # the magnitude where the two backflip policies separate.
+    @{ name = "shoved";    model = "checkpoints\imit_backflip_robust_latest.pt";
+       config = "configs\env2d_backflip_shove_demo.json" }
 )
 
 if ($Only -ne "") { $demos = $demos | Where-Object { $_.name -eq $Only } }

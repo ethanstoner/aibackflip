@@ -1,0 +1,63 @@
+// Capture environment for the "shoved mid-flip" GIF.
+//
+// env2d_backflip_capture.json with one 300 N s shove landing on control step
+// 35, roughly the apex, applied 0.4 m off the pelvis centre so it carries
+// torque and not just momentum.
+//
+// 300 N s is chosen because it is where the two policies separate: measured
+// over 96 episodes, the undisturbed backflip completes 38% of flips at this
+// magnitude and the shove-trained one completes 62%. A gentler shove would look
+// calmer and show nothing, since both policies survive it.
+{
+  "max_episode_steps": 130,
+
+  "reset_noise": {
+    "root_angle": 0.05,
+    "root_height": 0.02,
+    "joint_angle": 0.06,
+    "linear_velocity": 0.0,
+    "angular_velocity": 0.0
+  },
+
+  "disturbance": {
+    "at_step": 35,
+    "probability_per_step": 0.0,
+    "impulse_min": 300.0,
+    "impulse_max": 300.0,
+    "offset_max": 0.4
+  },
+
+  "humanoid": {
+    "joints": [
+      {"name": "waist",      "kd": 80},
+      {"name": "neck",       "kd": 8},
+      {"name": "shoulder_l", "kd": 16},
+      {"name": "elbow_l",    "kd": 10},
+      {"name": "shoulder_r", "kd": 16},
+      {"name": "elbow_r",    "kd": 10},
+      {"name": "hip_l",      "kd": 80},
+      {"name": "knee_l",     "kd": 60},
+      {"name": "ankle_l",    "kd": 30},
+      {"name": "hip_r",      "kd": 80},
+      {"name": "knee_r",     "kd": 60},
+      {"name": "ankle_r",    "kd": 30}
+    ]
+  },
+
+  "imitation": {
+    "motion": "motions/backflip.json",
+    "enabled": true,
+    "reference_state_init": false,
+    "early_termination_pose_error": 1,
+    "early_termination_root_error": 0.6,
+    "end_episode_at_motion_end": true,
+    "scales": {
+      "pose": 2.0,
+      "joint_velocity": 0.01,
+      "end_effector": 15.0,
+      "root": 20.0,
+      "com": 10.0,
+      "root_angle_weight": 0.5
+    }
+  }
+}

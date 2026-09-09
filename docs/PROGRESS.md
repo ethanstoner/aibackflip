@@ -1128,3 +1128,40 @@ environment changes, which is the only reason anyone resumes into a different co
 now resets it on resume. The failure mode is worth naming: a run that trains correctly for
 twenty minutes and silently produces no best checkpoint looks, from the log, exactly like a run
 that worked.
+
+### Does the cost have to be paid? Yes, and paying more buys more
+
+`env2d_backflip_robust_soft.json` trains the same fine-tune against 20–150 N·s instead of
+40–260. One variable. All three policies, same sweep:
+
+| shove | undisturbed | soft, 20–150 | harsh, 40–260 |
+|---|---|---|---|
+| 0 N·s | **100%** | 92% | 88% |
+| 100 | **100%** | 88% | 84% |
+| 200 | **83%** | **83%** | 72% |
+| 300 | 38% | 33% | **60%** |
+| 400 | 12% | 21% | **33%** |
+
+The gentler range gives up almost all of the robustness and still pays most of the baseline
+cost. There is no setting in the middle that avoids the trade: the cost appears as soon as
+disturbance training happens at all, and the benefit scales with how hard the training pushes.
+
+### Re-running the cells the conclusion rests on
+
+At 24 episodes a cell carries roughly ±10 percentage points, which is wider than several of the
+differences above. The two cells the claim actually depends on were re-run at **96 episodes**,
+undisturbed against harsh:
+
+| shove | undisturbed | shove-trained |
+|---|---|---|
+| 0 N·s | **100%** | 94% |
+| 300 | 38% | **62%** |
+| 400 | 12% | **44%** |
+
+The effect is larger than the small sample suggested and the cost is smaller: shove-training
+more than triples completion at 400 N·s and gives up six points at zero disturbance, not twelve.
+The 24-episode table above is kept as the record of what was run, but these are the numbers the
+conclusion rests on.
+
+Two rows in the small table were inside the noise and should not be read as findings: soft at
+300 N·s (33% against the undisturbed 38%) and the 200 N·s row's 83/83 tie.

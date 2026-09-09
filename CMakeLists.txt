@@ -68,6 +68,8 @@ add_library(aibf_humanoid STATIC
   cpp/humanoid/Humanoid2D.cpp
   cpp/humanoid/HumanoidConfig3D.cpp
   cpp/humanoid/Humanoid3D.cpp
+  cpp/humanoid/Observation3D.cpp
+  cpp/humanoid/RewardTerms3D.cpp
   cpp/humanoid/Observation.cpp
   cpp/humanoid/RewardTerms.cpp
 )
@@ -78,11 +80,10 @@ target_link_libraries(aibf_humanoid PUBLIC aibf_physics)
 # link GLFW or OpenGL at all.
 add_library(aibf_env_lib STATIC
   cpp/env/Env2D.cpp
-  cpp/env/EnvBatch.cpp
+  cpp/env/Env3D.cpp
   cpp/motion/Motion2D.cpp
   cpp/net/Protocol.cpp
   cpp/net/UDPSocket.cpp
-  cpp/net/EnvServer.cpp
 )
 target_link_libraries(aibf_env_lib PUBLIC aibf_humanoid)
 if(WIN32)

@@ -1,0 +1,24 @@
+// Standing task for the 3D humanoid.
+//
+// The reset noise is the 2D figure's, with one difference that matters: the
+// tilt is applied about a random horizontal axis rather than the single axis a
+// sagittal figure had. Sideways is the interesting direction, because the
+// ankles are hinges with no roll, so the figure has to answer a lateral push
+// with its hips the way a person does.
+{
+  "max_episode_steps": 1000,
+
+  "reset_noise": {
+    "root_tilt": 0.06,
+    "root_height": 0.02,
+    "joint_angle": 0.08,
+    "linear_velocity": 0.15,
+    "angular_velocity": 0.15
+  },
+
+  "termination": {
+    "pelvis_height_ratio": 0.55,
+    "head_height_ratio": 0.55,
+    "chest_upright_below": 0.2
+  }
+}

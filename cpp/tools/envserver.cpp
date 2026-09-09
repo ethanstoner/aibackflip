@@ -31,6 +31,11 @@ struct Options {
     std::string configPath;
     std::string dumpConfigPath;
     bool render = false;
+    // Serves the 3D figure instead of the 2D one. Same protocol, same batch,
+    // same server: only the environment type differs, so Python needs no change
+    // beyond reading the dimensions out of the SPEC handshake, which it already
+    // does rather than hardcoding them.
+    bool threeD = false;
     int renderEnv = 0;
     int width = 1280;
     int height = 720;
@@ -93,6 +98,7 @@ bool parseOptions(int argc, char** argv, Options& out, bool& showHelp) {
             out.capturePath = argv[++i];
             out.render = true;
         }
+        else if (arg == "--3d") { out.threeD = true; }
         else if (arg == "--render-env") { nextInt(out.renderEnv); }
         else if (arg == "--width") { nextInt(out.width); }
         else if (arg == "--height") { nextInt(out.height); }
@@ -115,8 +121,9 @@ bool parseOptions(int argc, char** argv, Options& out, bool& showHelp) {
     return true;
 }
 
-void printStatus(const net::EnvServer& server, double elapsedSeconds, uint64_t stepsAtLastPrint) {
-    const net::EnvServer::Stats& stats = server.stats();
+template <typename Server>
+void printStatus(const Server& server, double elapsedSeconds, uint64_t stepsAtLastPrint) {
+    const auto& stats = server.stats();
     const double rate = elapsedSeconds > 0
                             ? double(stats.controlStepsServed - stepsAtLastPrint) / elapsedSeconds
                             : 0.0;
@@ -131,7 +138,8 @@ void printStatus(const net::EnvServer& server, double elapsedSeconds, uint64_t s
     std::fflush(stdout);
 }
 
-int runHeadless(net::EnvServer& server, const Options& options) {
+template <typename Server>
+int runHeadless(Server& server, const Options& options) {
     std::printf("serving %d environments on %s:%u (session %u)\n", server.batch().size(),
                 options.server.bindAddress.c_str(), server.port(), server.session());
     std::printf("observation %d, action %d, reward terms %d\n", EnvBatch::observationDim(),
@@ -314,6 +322,46 @@ int runRendered(net::EnvServer& server, const Options& options) {
 
 }  // namespace
 
+// The 3D path. Headless only: the renderer is still 2D, so a 3D session is
+// trained and then inspected with the tools rather than watched live.
+int run3D(const Options& options) {
+    EnvConfig3D config = EnvConfig3D::defaults();
+    if (!options.configPath.empty()) {
+        std::string error;
+        config = EnvConfig3D::loadFile(options.configPath, &error);
+        if (!error.empty()) {
+            std::fprintf(stderr, "config problem: %s\n", error.c_str());
+            return 2;
+        }
+    }
+    const std::string problem = config.validate();
+    if (!problem.empty()) {
+        std::fprintf(stderr, "invalid environment config: %s\n", problem.c_str());
+        return 2;
+    }
+
+    if (!options.dumpConfigPath.empty()) {
+        if (!config.toJson().writeFile(options.dumpConfigPath)) {
+            std::fprintf(stderr, "could not write %s\n", options.dumpConfigPath.c_str());
+            return 1;
+        }
+        std::printf("wrote %s\n", options.dumpConfigPath.c_str());
+        return 0;
+    }
+
+    if (options.render) {
+        std::fprintf(stderr, "the renderer is 2D only; --3d implies headless\n");
+        return 2;
+    }
+
+    net::EnvServer3D server;
+    if (!server.start(config, options.server)) {
+        std::fprintf(stderr, "could not start the server: %s\n", server.lastError().c_str());
+        return 1;
+    }
+    return runHeadless(server, options);
+}
+
 int main(int argc, char** argv) {
     Options options;
     bool showHelp = false;
@@ -322,6 +370,8 @@ int main(int argc, char** argv) {
         printUsage();
         return 0;
     }
+
+    if (options.threeD) return run3D(options);
 
     EnvConfig config = EnvConfig::defaults();
     if (!options.configPath.empty()) {

@@ -143,6 +143,8 @@ struct EnvConfig {
 
 class Env2D {
 public:
+    using Config = EnvConfig;
+
     void initialize(const EnvConfig& config, uint64_t seed);
 
     void reset();

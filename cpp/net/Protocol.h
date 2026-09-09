@@ -30,6 +30,11 @@ constexpr uint16_t kVersion = 1;
 // limit; this cap keeps a corrupt length field from allocating wildly.
 constexpr size_t kMaxPacketBytes = 60000;
 
+// Fixed overhead of a STATE message: the 16-byte header plus the counts that
+// precede each block. Rounded up, because it is used to refuse a batch that
+// cannot fit and being slightly pessimistic there is free.
+constexpr size_t kStateHeaderBytes = 64;
+
 enum class MessageType : uint16_t {
     Hello = 1,   // python -> c++  : request a spec, declare the environment count
     Spec = 2,    // c++ -> python  : dimensions, joint limits, names

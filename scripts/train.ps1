@@ -21,6 +21,8 @@ param(
     # Opens a window showing one environment while it trains. Costs throughput,
     # because serving and drawing share a thread - useful for seeing what a
     # policy is doing, not for a run you want finished quickly.
+    # Serves the 3D humanoid. Headless only, since the renderer is still 2D.
+    [switch]$ThreeD,
     [switch]$Render,
     [int]$RenderEnv = 0
 )
@@ -34,6 +36,7 @@ if (-not (Test-Path $EnvExe)) { throw "missing $EnvExe - run scripts\build.ps1" 
 if (-not (Test-Path $Python)) { $Python = "python" }
 
 $serverArgs = @("--quiet", "--port", "$Port", "--envs", "$Envs", "--seed", "$Seed")
+if ($ThreeD) { $serverArgs += "--3d" }
 if ($Render) {
     $serverArgs += @("--render", "--render-env", "$RenderEnv")
     Write-Host "rendering environment $RenderEnv (x/z shove, b throws a ball, mouse drags)" -ForegroundColor Yellow

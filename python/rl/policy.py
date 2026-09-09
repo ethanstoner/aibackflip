@@ -21,6 +21,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import numpy as np
+import time
+
 import torch
 import torch.nn as nn
 from torch.distributions import Normal
@@ -167,7 +169,19 @@ def save_checkpoint(
     # mid-save leaves the previous checkpoint intact instead of a truncated one.
     temporary = path.with_suffix(path.suffix + ".tmp")
     torch.save(payload, temporary)
-    temporary.replace(path)
+    # os.replace is atomic on Windows but not immune to a transient lock: a
+    # virus scanner or the indexer opening the file it just saw written makes it
+    # fail with Access Denied. That killed the final save of a 57 minute run
+    # after every intermediate save in the same run had succeeded, so the retry
+    # is worth more than the two lines it costs.
+    for attempt in range(8):
+        try:
+            temporary.replace(path)
+            return
+        except PermissionError:
+            if attempt == 7:
+                raise
+            time.sleep(0.25 * (attempt + 1))
 
 
 def load_checkpoint(

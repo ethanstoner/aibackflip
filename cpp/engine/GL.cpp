@@ -27,6 +27,7 @@ UseProgramProc UseProgram = nullptr;
 DeleteProgramProc DeleteProgram = nullptr;
 GetUniformLocationProc GetUniformLocation = nullptr;
 UniformMatrix4fvProc UniformMatrix4fv = nullptr;
+UniformMatrix3fvProc UniformMatrix3fv = nullptr;
 Uniform4fProc Uniform4f = nullptr;
 Uniform3fProc Uniform3f = nullptr;
 Uniform1fProc Uniform1f = nullptr;
@@ -80,6 +81,7 @@ bool load(std::string* missing) {
     AIBF_LOAD(DeleteProgram, "glDeleteProgram");
     AIBF_LOAD(GetUniformLocation, "glGetUniformLocation");
     AIBF_LOAD(UniformMatrix4fv, "glUniformMatrix4fv");
+    AIBF_LOAD(UniformMatrix3fv, "glUniformMatrix3fv");
     AIBF_LOAD(Uniform4f, "glUniform4f");
     AIBF_LOAD(Uniform3f, "glUniform3f");
     AIBF_LOAD(Uniform1f, "glUniform1f");

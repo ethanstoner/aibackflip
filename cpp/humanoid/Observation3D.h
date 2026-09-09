@@ -62,10 +62,25 @@ struct ObservationLayout3D {
 // network fed raw metres per second spends its first thousand updates learning
 // the scale instead of the task.
 struct ObservationScales3D {
-    Real height = Real(1.64);        // rest height, filled in from the figure
+    // Three separate height scales, matching ObservationScales in 2D rather
+    // than collapsing them into one.
+    //
+    // The collapsed version was not wrong dimensionally, it just meant
+    // something different: dividing the pelvis by the *full body* height made a
+    // perfectly upright figure read 0.607 instead of 1.0, and a diagnostic that
+    // prints "of rest height" then reports a standing policy as a deep crouch.
+    // That misreading survived until the frames were rendered and the figure
+    // was plainly upright. One convention across both figures, so a number
+    // means the same thing wherever it is read.
+    Real pelvisRestHeight = 1;
+    Real headRestHeight = 1;
+    Real bodyHeight = 1;
+
     Real linearVelocity = Real(5);
     Real angularVelocity = Real(10);
     Real jointVelocity = Real(10);
+
+    static ObservationScales3D fromConfig(const Humanoid3DConfig& config);
 };
 
 // Writes exactly ObservationLayout3D::kDimension values.

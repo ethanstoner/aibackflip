@@ -3,6 +3,7 @@
 
 #include "core/Test.h"
 #include "humanoid/Humanoid3D.h"
+#include "humanoid/Observation3D.h"
 
 using namespace aibf;
 
@@ -319,4 +320,35 @@ TEST(Humanoid3D, aTumblingFigureInFreeFlightKeepsItsAngularMomentum) {
     // One second of tumbling, within the truncation bound measured in
     // test_joints3d for a two-body pair.
     CHECK(length(final - initial) < length(initial) * Real(0.05));
+}
+
+TEST(Humanoid3D, standingReadsOneInTheHeightSlots) {
+    // The same assertion the 2D suite makes, and it is here because the two
+    // figures briefly disagreed. The 3D observation divided the pelvis by the
+    // *whole body* height, so a perfectly upright figure read 0.607, and the
+    // evaluation script, which prints that slot as "of rest height", reported a
+    // working standing policy as a deep crouch sitting just above its own
+    // termination threshold.
+    //
+    // Nothing was physically wrong. The reward and the termination both used the
+    // pelvis's own rest height and were correct throughout. Only the observation
+    // used a different convention, and one convention per repository is the
+    // whole point.
+    World3D world;
+    world.addHalfSpace(HalfSpace3D{Vec3(0, 1, 0), Real(0), Real(1.0), Real(0)});
+    Humanoid3D figure;
+    const Humanoid3DConfig cfg = Humanoid3DConfig::defaults();
+    figure.build(world, cfg, Vec3(0, Real(1.0), 0));
+
+    const ObservationScales3D scales = ObservationScales3D::fromConfig(cfg);
+    std::vector<Real> obs(static_cast<size_t>(ObservationLayout3D::kDimension));
+    writeObservation3D(world, figure, scales, Real(0), obs.data());
+
+    CHECK_NEAR(obs[ObservationLayout3D::kPelvisHeight], 1.0, 0.02);
+    CHECK_NEAR(obs[ObservationLayout3D::kHeadHeight], 1.0, 0.02);
+
+    // Offsets stay divided by the whole body, which is what makes them
+    // comparable between links rather than each carrying its own scale.
+    const int headOffset = ObservationLayout3D::kLinkOffsets + 3 * 1;  // chest is index 0
+    CHECK(std::abs(obs[headOffset + 1]) < Real(0.5));
 }

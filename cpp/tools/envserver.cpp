@@ -19,6 +19,7 @@
 
 #include "engine/DebugDraw.h"
 #include "engine/Renderer2D.h"
+#include "engine/Renderer3D.h"
 #include "engine/Window.h"
 #endif
 
@@ -324,6 +325,10 @@ int runRendered(net::EnvServer& server, const Options& options) {
 
 // The 3D path. Headless only: the renderer is still 2D, so a 3D session is
 // trained and then inspected with the tools rather than watched live.
+#ifdef AIBF_WITH_RENDERER
+#include "tools/render3d.inl"
+#endif
+
 int run3D(const Options& options) {
     EnvConfig3D config = EnvConfig3D::defaults();
     if (!options.configPath.empty()) {
@@ -349,16 +354,22 @@ int run3D(const Options& options) {
         return 0;
     }
 
-    if (options.render) {
-        std::fprintf(stderr, "the renderer is 2D only; --3d implies headless\n");
-        return 2;
-    }
-
     net::EnvServer3D server;
     if (!server.start(config, options.server)) {
         std::fprintf(stderr, "could not start the server: %s\n", server.lastError().c_str());
         return 1;
     }
+
+#ifdef AIBF_WITH_RENDERER
+    // A capture request implies rendering, since there is nothing to screenshot
+    // otherwise.
+    if (options.render || !options.capturePath.empty()) return runRendered3D(server, options);
+#else
+    if (options.render) {
+        std::fprintf(stderr, "this build has no renderer; --render is unavailable\n");
+        return 2;
+    }
+#endif
     return runHeadless(server, options);
 }
 

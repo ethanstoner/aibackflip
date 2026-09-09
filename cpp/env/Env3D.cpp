@@ -121,7 +121,7 @@ void Env3D::initialize(const EnvConfig3D& config, uint64_t seed) {
     world_.addHalfSpace(HalfSpace3D{Vec3(0, 1, 0), Real(0), Real(1.0), Real(0)});
     figure_.build(world_, config_.humanoid, config_.spawnPosition);
 
-    scales_.height = config_.humanoid.restHeight();
+    scales_ = ObservationScales3D::fromConfig(config_.humanoid);
     lastActions_.assign(static_cast<size_t>(actionDim()), Real(0));
 
     reset();

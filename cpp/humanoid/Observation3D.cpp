@@ -26,6 +26,14 @@ void writeVec3(const Vec3& v, Real* out) {
 
 }  // namespace
 
+ObservationScales3D ObservationScales3D::fromConfig(const Humanoid3DConfig& config) {
+    ObservationScales3D scales;
+    scales.pelvisRestHeight = config.links[kPelvis].restPosition.y;
+    scales.headRestHeight = config.links[kHead].restPosition.y;
+    scales.bodyHeight = config.restHeight();
+    return scales;
+}
+
 std::vector<std::string> ObservationLayout3D::fieldNames() {
     std::vector<std::string> names;
     names.reserve(static_cast<size_t>(kDimension));
@@ -86,9 +94,11 @@ void writeObservation3D(const World3D& world, const Humanoid3D& figure,
     using L = ObservationLayout3D;
 
     const RigidBody3D& pelvis = figure.link(world, kPelvis);
-    const Real invHeight = scales.height > Real(0) ? Real(1) / scales.height : Real(1);
+    // Offsets are divided by the whole body's height; the pelvis and head are
+    // each divided by their own rest height, so both read 1.0 when standing.
+    const Real invHeight = scales.bodyHeight > Real(0) ? Real(1) / scales.bodyHeight : Real(1);
 
-    out[L::kPelvisHeight] = pelvis.position.y * invHeight;
+    out[L::kPelvisHeight] = pelvis.position.y / scales.pelvisRestHeight;
     writeRotation6D(pelvis.orientation, out + L::kPelvisRotation);
     writeVec3(pelvis.velocity / scales.linearVelocity, out + L::kPelvisLinearVelocity);
     writeVec3(pelvis.angularVelocity / scales.angularVelocity, out + L::kPelvisAngularVelocity);
@@ -150,7 +160,7 @@ void writeObservation3D(const World3D& world, const Humanoid3D& figure,
     writeVec3((com - pelvis.position) * invHeight, out + L::kComOffset);
     writeVec3(figure.centerOfMassVelocity(world) / scales.linearVelocity, out + L::kComVelocity);
 
-    out[L::kHeadHeight] = figure.link(world, kHead).position.y * invHeight;
+    out[L::kHeadHeight] = figure.link(world, kHead).position.y / scales.headRestHeight;
 
     // Phase on the circle, so the wrap from 1 back to 0 is not a discontinuity
     // in the input.

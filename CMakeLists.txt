@@ -138,6 +138,7 @@ add_executable(aibf_tests
   cpp/tests/test_protocol.cpp
   cpp/tests/test_env.cpp
   cpp/tests/test_motion.cpp
+  cpp/tests/test_body3d.cpp
 )
 target_link_libraries(aibf_tests PRIVATE aibf_env_lib)
 

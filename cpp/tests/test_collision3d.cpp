@@ -136,7 +136,19 @@ TEST(CapsuleHalfSpace3D, anUprightCapsuleTouchesTheGroundAtOnePoint) {
     CHECK(count == 1);
     CHECK_NEAR(manifold.points[0].separation, 0.0, 1e-5);
     CHECK_NEAR(manifold.points[0].position.y, 0.0, 1e-5);
-    CHECK_NEAR(manifold.normal.y, 1.0, 1e-6);
+}
+
+TEST(CapsuleHalfSpace3D, theNormalPointsFromTheCapsuleIntoTheGround) {
+    // The solver pushes body A along -normal, so for a capsule above the floor
+    // the manifold normal has to point down. The first version of this file
+    // asserted +1 here, which matched the implementation and was wrong in both
+    // places: with the sign flipped the ground never resolves anything and a
+    // dropped capsule falls to y = -599 over four seconds without a single
+    // contact test failing.
+    RigidBody3D body = capsule(Vec3(0, Real(0.29), 0), Real(0.1), Real(0.2));
+    Manifold3D manifold;
+    CHECK(collideCapsuleHalfSpace3D(body, kGround, manifold) == 1);
+    CHECK_NEAR(manifold.normal.y, -1.0, 1e-6);
 }
 
 TEST(CapsuleHalfSpace3D, aCapsuleLyingFlatTouchesAtBothEnds) {

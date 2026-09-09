@@ -58,7 +58,12 @@ Real closestPointsBetweenSegments3D(const Vec3& p1, const Vec3& q1,
 
 int collideCapsuleHalfSpace3D(const RigidBody3D& capsule, const HalfSpace3D& plane,
                               Manifold3D& out) {
-    out.normal = plane.normal;
+    // A is the capsule, B is the plane, and the manifold normal runs from A to
+    // B, which is *into* the ground. The solver pushes A along -normal, so this
+    // is the sign that lifts the capsule out. Getting it backwards does not
+    // produce a visibly wrong contact, it produces a ground that never resolves
+    // anything and a body in permanent free fall.
+    out.normal = -plane.normal;
     buildTangentBasis(out.normal, out.tangent1, out.tangent2);
     out.friction = combineFriction3D(capsule.friction, plane.friction);
     out.restitution = combineRestitution3D(capsule.restitution, plane.restitution);

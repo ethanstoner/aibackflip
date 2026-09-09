@@ -57,6 +57,8 @@ add_library(aibf_physics STATIC
   cpp/physics/Joint2D.cpp
   cpp/physics/World2D.cpp
   cpp/physics/Collision3D.cpp
+  cpp/physics/Joint3D.cpp
+  cpp/physics/World3D.cpp
 )
 target_link_libraries(aibf_physics PUBLIC aibf_core)
 
@@ -141,6 +143,7 @@ add_executable(aibf_tests
   cpp/tests/test_motion.cpp
   cpp/tests/test_body3d.cpp
   cpp/tests/test_collision3d.cpp
+  cpp/tests/test_joints3d.cpp
 )
 target_link_libraries(aibf_tests PRIVATE aibf_env_lib)
 

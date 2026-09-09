@@ -28,17 +28,11 @@ struct HalfSpace3D {
     Real signedDistance(const Vec3& p) const { return dot(normal, p) - offset; }
 };
 
-// Any two unit vectors perpendicular to `n` and to each other. The branch keeps
-// the construction away from the degenerate case where n is parallel to the axis
-// being crossed with, which would otherwise produce a zero-length tangent
-// exactly when the ground contact is most ordinary.
+// The contact plane's friction basis. Named for its role here; the construction
+// is `orthonormalBasis` in core/Math.h, shared with the hinge joint's two-axis
+// angular lock.
 inline void buildTangentBasis(const Vec3& n, Vec3& t1, Vec3& t2) {
-    if (std::abs(n.x) >= Real(0.57735)) {
-        t1 = normalize(Vec3(n.y, -n.x, 0));
-    } else {
-        t1 = normalize(Vec3(0, n.z, -n.y));
-    }
-    t2 = cross(n, t1);
+    orthonormalBasis(n, t1, t2);
 }
 
 inline Real combineFriction3D(Real a, Real b) { return std::sqrt(a * b); }

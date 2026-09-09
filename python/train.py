@@ -187,7 +187,16 @@ def main() -> int:
 
     env_steps = meta.env_steps
     started = time.perf_counter()
-    best_return = meta.best_return
+
+    # Resuming carries the *weights* forward, not the score to beat.
+    #
+    # Returns are only comparable within one task. Fine-tuning the backflip
+    # against random shoves inherited a +42.70 watermark from the undisturbed
+    # run and spent 10M steps between +26 and +32, because the disturbed task
+    # simply pays less - so the condition below never fired once and the run
+    # finished having written no `_best` checkpoint at all. A run that trains
+    # successfully for an hour and saves nothing is a silent failure.
+    best_return = meta.best_return if args.resume is None else -float("inf")
 
     try:
         for update in range(1, total_updates + 1):

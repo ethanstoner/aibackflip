@@ -42,6 +42,8 @@ EnvConfig EnvConfig::fromJson(const Json& json) {
     config.pushIntervalSteps = push["interval_steps"].integer(config.pushIntervalSteps);
     config.pushImpulseMin = push["impulse_min"].real(config.pushImpulseMin);
     config.pushImpulseMax = push["impulse_max"].real(config.pushImpulseMax);
+    config.pushOffsetMax = push["offset_max"].real(config.pushOffsetMax);
+    config.pushAtStep = push["at_step"].integer(config.pushAtStep);
 
     const Json& imitation = json["imitation"];
     if (imitation.isObject()) {
@@ -114,6 +116,8 @@ Json EnvConfig::toJson() const {
     push.set("interval_steps", Json(pushIntervalSteps));
     push.set("impulse_min", Json(double(pushImpulseMin)));
     push.set("impulse_max", Json(double(pushImpulseMax)));
+    push.set("offset_max", Json(double(pushOffsetMax)));
+    push.set("at_step", Json(pushAtStep));
     root.set("disturbance", std::move(push));
 
     Json imitationJson = Json::object();
@@ -341,7 +345,12 @@ void Env2D::maybeDisturb() {
     bool shove = false;
     Real direction = 0;
 
-    if (config_.pushIntervalSteps > 0) {
+    if (config_.pushAtStep > 0) {
+        if (episodeStep_ == config_.pushAtStep) {
+            shove = true;
+            direction = (pushCount_ % 2 == 0) ? Real(1) : Real(-1);
+        }
+    } else if (config_.pushIntervalSteps > 0) {
         // Measurement schedule: exactly on the beat, alternating side, so a
         // survival rate is attributable to the impulse magnitude and not to how
         // many shoves happened to land.
@@ -357,12 +366,20 @@ void Env2D::maybeDisturb() {
 
     if (!shove) return;
     const Real magnitude = rng_.uniform(config_.pushImpulseMin, config_.pushImpulseMax);
-    push(Vec2(magnitude * direction, 0));
+    const Real offset = config_.pushOffsetMax > Real(0)
+                            ? rng_.uniform(-config_.pushOffsetMax, config_.pushOffsetMax)
+                            : Real(0);
+    push(Vec2(magnitude * direction, 0), offset);
     ++pushCount_;
 }
 
-void Env2D::push(const Vec2& impulse) {
-    figure_.link(world_, kPelvis).applyImpulse(impulse, Vec2(0, 0));
+void Env2D::push(const Vec2& impulse, Real offset) {
+    RigidBody2D& pelvis = figure_.link(world_, kPelvis);
+    // The offset is along the torso in the pelvis's own frame, so a shove to
+    // the chest stays a shove to the chest however the figure is oriented -
+    // including upside down.
+    const Vec2 arm = rotate(Vec2(0, offset), pelvis.angle);
+    pelvis.applyImpulse(impulse, arm);
 }
 
 void Env2D::evaluateTermination() {

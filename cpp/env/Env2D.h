@@ -106,6 +106,26 @@ struct EnvConfig {
     Real pushImpulseMin = 0;
     Real pushImpulseMax = 0;
 
+    // Fires exactly one shove, on this control step; 0 disables. A repeating
+    // beat is the right schedule for "can it stay upright", but the wrong one
+    // for "can it survive being hit at the apex of a flip" - by the second
+    // shove the figure has landed, and the result stops being a statement about
+    // mid-air recovery.
+    int pushAtStep = 0;
+
+    // How far from the pelvis centre the impulse lands, in metres, sampled
+    // uniformly from +/- this along the torso. Zero applies it exactly at the
+    // centre of mass.
+    //
+    // That default is fine for a figure standing on the ground - the feet are
+    // planted, so a centred horizontal shove still creates a toppling moment
+    // about them. It is useless in the air. A free-flying body has nothing to
+    // lever against, so a centred impulse only translates it and **cannot
+    // change its rotation at all**. Testing a backflip against centred shoves
+    // produces a perfect survival rate for reasons that have nothing to do with
+    // the policy, which is exactly the trap this field exists to avoid.
+    Real pushOffsetMax = 0;
+
     // --- imitation (M7) ---
     ImitationSettings imitation;
 
@@ -166,9 +186,11 @@ public:
     // Root deviation from the reference: height and orientation combined.
     Real rootError() const;
 
-    // Applies an impulse to the pelvis. Used by the disturbance schedule and by
-    // the interactive push tool.
-    void push(const Vec2& impulse);
+    // Applies an impulse to the pelvis. `offset` is measured along the torso in
+    // the pelvis's own frame; a non-zero value produces torque as well as
+    // linear momentum, which is the only kind of disturbance that can perturb a
+    // body in free flight.
+    void push(const Vec2& impulse, Real offset = 0);
 
 private:
     void evaluateTermination();

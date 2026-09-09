@@ -15,6 +15,14 @@ checkpoints/*.pt
 checkpoints/*.json
 !checkpoints/.gitkeep
 
+# Except the four the README and docs/PROGRESS.md quote numbers from. 2.2 MB
+# each, and without them every "reproduce this" command in the README fails on
+# a fresh clone - which would make the results unfalsifiable by anyone but me.
+!checkpoints/imit_backflip_best.pt
+!checkpoints/imit_roll_best.pt
+!checkpoints/imit_jump_v2_best.pt
+!checkpoints/robust_v1_best.pt
+
 # Internal working notes never belong in this repo.
 CLAUDE.md
 PROJECT_STATUS.md

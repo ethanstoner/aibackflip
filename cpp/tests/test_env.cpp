@@ -1,4 +1,5 @@
 #include <cmath>
+#include <cstdio>
 #include <filesystem>
 #include <system_error>
 #include <vector>
@@ -402,6 +403,98 @@ TEST(Env, aRandomPolicyNeverBreaksTheSimulation) {
         }
     }
     CHECK(episodes > 10);  // it really did run many episodes, not one long one
+}
+
+// What a "centred" impulse actually does, which is not what it sounds like.
+//
+// Applied at the pelvis's own centre of mass, an impulse imparts no angular
+// velocity *to the pelvis, in the instant it lands* - that much is just the
+// definition of a moment arm, and it is what this test pins.
+//
+// It does not follow that the figure cannot rotate. The pelvis is not the
+// system's centre of mass; the torso, arms and head sit above it. So within one
+// solver step the joints transmit the impulse to the rest of the body and the
+// whole figure begins to turn about the true centre of mass, which measures at
+// 0.09 rad/s of peak spin for a 40 N.s shove against 0.40 rad/s for the same
+// shove applied 0.3 m off centre.
+//
+// The offset is therefore a way to make a disturbance several times more
+// rotational for the same linear momentum, not the difference between rotating
+// and not rotating.
+TEST(Env, aCentredImpulseImpartsNoAngularVelocityAtTheInstantItLands) {
+    const Real kImpulse = 60;
+
+    auto flightTest = [&](Real offset) {
+        Env2D env;
+        EnvConfig config = quickConfig(400);
+        config.resetNoise = ResetNoise{};  // identical starting states
+        env.initialize(config, 7);
+        env.reset();
+
+        // Off the ground, so the only thing the impulse can act against is the
+        // figure's own inertia.
+        RigidBody2D& pelvis = env.figure().link(env.world(), kPelvis);
+        for (int i = 0; i < kLinkCount; ++i) {
+            env.figure().link(env.world(), i).position.y += Real(3);
+        }
+        const Real omegaBefore = pelvis.angularVelocity;
+        const Real vxBefore = pelvis.velocity.x;
+
+        env.push(Vec2(kImpulse, 0), offset);
+        return std::pair<Real, Real>(pelvis.angularVelocity - omegaBefore,
+                                     pelvis.velocity.x - vxBefore);
+    };
+
+    const auto centred = flightTest(Real(0));
+    const auto offset = flightTest(Real(0.25));
+
+    // Same linear response either way - momentum does not care where it lands.
+    CHECK_NEAR(centred.second, offset.second, Real(1e-4));
+    CHECK(centred.second > Real(1));
+
+    // But only the offset push spins the pelvis on contact.
+    CHECK_NEAR(centred.first, Real(0), Real(1e-6));
+    CHECK(std::fabs(offset.first) > Real(1));
+}
+
+TEST(Env, theDisturbanceScheduleAppliesTheConfiguredOffset) {
+    // A config field that parses but never reaches the simulation is the exact
+    // failure this guards, so the two runs differ only in `pushOffsetMax` and
+    // share a seed. The claim is comparative rather than a threshold picked to
+    // fit whatever the code happened to produce.
+    auto peakSpinInFlight = [](Real offsetMax) {
+        EnvConfig config = quickConfig(400);
+        config.resetNoise = ResetNoise{};
+        config.pushIntervalSteps = 20;
+        config.pushImpulseMin = 40;
+        config.pushImpulseMax = 40;
+        config.pushOffsetMax = offsetMax;
+
+        Env2D env;
+        env.initialize(config, 11);
+        env.reset();
+        for (int i = 0; i < kLinkCount; ++i) {
+            env.figure().link(env.world(), i).position.y += Real(6);
+        }
+
+        const std::vector<Real> actions = zeroActions();
+        Real peak = 0;
+        for (int step = 0; step < 60 && !env.done(); ++step) {
+            env.step(actions.data(), Env2D::actionDim());
+            peak = std::max(peak,
+                            std::fabs(env.figure().link(env.world(), kPelvis).angularVelocity));
+        }
+        return peak;
+    };
+
+    const Real centred = peakSpinInFlight(Real(0));
+    const Real offset = peakSpinInFlight(Real(0.3));
+
+    // Both spin the figure, because the pelvis is below the system centre of
+    // mass either way. The offset roughly quadruples it, and that ratio is the
+    // evidence that the field reached the simulation.
+    CHECK(centred > Real(0.02));
+    CHECK(offset > Real(3) * centred);
 }
 
 // ---------------------------------------------------------------- imitation

@@ -1,0 +1,102 @@
+// The backflip trained against *gentler* shoves. One variable away from
+// env2d_backflip_robust.json: the impulse range, 20-150 N s instead of 40-260.
+//
+// The harsh range bought robustness and charged for it. It took 300 N s
+// completion from 38% to 60% and 400 N s from 12% to 33%, and paid 100% to 88%
+// at zero disturbance - the policy got worse at the backflip itself. This asks
+// whether that trade is forced or just a consequence of training almost
+// entirely outside the range the policy could survive.
+//
+// Otherwise identical to env2d_backflip.json except
+// for the disturbance block below.
+//
+// Reference State Initialization is on: each episode starts at a random phase
+// of the clip, with the velocities that belong to that phase. Without it the
+// policy must master the opening before it ever observes the ending.
+{
+  "max_episode_steps": 160,
+
+  // Shoves arrive at random, and land off the pelvis centre so they carry
+  // torque as well as momentum.
+  //
+  // The magnitudes are chosen from the undisturbed policy's own failure curve
+  // (docs/PROGRESS.md, M8b): it lands the flip 100% of the time up to 100 N.s
+  // at mid-flight, 83% at 200, and 12% at 400. Training entirely inside the
+  // range it already survives would teach it nothing, and entirely outside it
+  // would be a wall of unrecoverable episodes, so the range straddles the knee
+  // of that curve.
+  //
+  // The offset is what makes these disturbances rotational. A shove applied at
+  // the pelvis centre still turns the figure - the pelvis sits below the
+  // system's centre of mass - but only weakly: measured, an off-centre shove
+  // produces about four times the spin for the same linear momentum.
+  "disturbance": {
+    "probability_per_step": 0.02,
+    "impulse_min": 20.0,
+    "impulse_max": 150.0,
+    "offset_max": 0.4
+  },
+
+  "reset_noise": {
+    "root_angle": 0.05,
+    "root_height": 0.02,
+    "joint_angle": 0.06,
+    "linear_velocity": 0.0,
+    "angular_velocity": 0.0
+  },
+
+  // Damping lowered from the standing default of kd = kp/10 to kd = kp/50.
+  // Tracking bandwidth is kp/kd, and measured (aibf_diag bandwidth) the knee
+  // reaches 47% of a commanded 3 Hz swing at kp/10 against 97% at kp/50. A
+  // backflip tuck sweeps the knee at roughly 17 rad/s, so the standing gains
+  // simply cannot follow it.
+  "humanoid": {
+    "joints": [
+      {"name": "waist",      "kd": 80},
+      {"name": "neck",       "kd": 8},
+      {"name": "shoulder_l", "kd": 16},
+      {"name": "elbow_l",    "kd": 10},
+      {"name": "shoulder_r", "kd": 16},
+      {"name": "elbow_r",    "kd": 10},
+      {"name": "hip_l",      "kd": 80},
+      {"name": "knee_l",     "kd": 60},
+      {"name": "ankle_l",    "kd": 30},
+      {"name": "hip_r",      "kd": 80},
+      {"name": "knee_r",     "kd": 60},
+      {"name": "ankle_r",    "kd": 30}
+    ]
+  },
+
+  "imitation": {
+    "motion": "motions/backflip.json",
+    "enabled": true,
+    "reference_state_init": true,
+
+    // Joint deviation ends an episode that is not coming back.
+    "early_termination_pose_error": 1,
+
+    // Root deviation ends one that is tracking the joints while doing something
+    // else entirely. Joint angles are root-relative, so a figure lying on its
+    // back can hold the reference pose perfectly - the first squat policy
+    // trained here did exactly that, scoring pose_match 0.855 while flat on the
+    // ground with its feet in the air.
+    "early_termination_root_error": 0.6,
+
+    "end_episode_at_motion_end": true,
+
+    // Falloff rates, retuned from DeepMimic's after measuring what a working
+    // policy actually achieves. A term is only useful where it has gradient:
+    // at the original joint_velocity rate of 0.1 the term read exactly 0.000
+    // for a policy that was visibly performing the motion, so it contributed
+    // nothing at all. These put a good policy in the middle of the range with
+    // room to improve rather than pinned against an end of it.
+    "scales": {
+      "pose": 2.0,
+      "joint_velocity": 0.01,
+      "end_effector": 15.0,
+      "root": 20.0,
+      "com": 10.0,
+      "root_angle_weight": 0.5
+    }
+  }
+}

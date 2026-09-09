@@ -974,3 +974,157 @@ the 3D humanoid.
 - The verification scripts written for this were throwaway and one had a sign bug: the rotation
   check only counted positive rotation, so it reported 0/16 for the forward roll's clean −360°.
   Corrected by reading the numbers, not the verdict.
+
+---
+
+## M8b — mid-air disturbance, and a measurement that measured nothing
+
+The question this milestone exists to answer is the one anybody asks after seeing the backflip:
+if you shove it mid-flip, does it recover?
+
+### The first answer was garbage, and it looked great
+
+The initial sweep reported an identical 23/24 completion rate at **every** magnitude from 0 to
+180 N·s. Read one way that is a policy so robust the disturbance is beneath its notice. Read
+correctly it is a sweep that never varied its own independent variable — the magnitude column
+was decoration.
+
+Two things were wrong, and only one of them was the one first blamed.
+
+**The wrong diagnosis.** The impulse was applied at the pelvis's centre of mass, and the first
+explanation was that a centred impulse carries no angular part, so a free-flying figure cannot
+be rotated by it. That is true of a *single rigid body* and false of this figure. The pelvis is
+not the system's centre of mass — the chest, arms and head sit above it — so within one solver
+step the joints transmit the impulse and the whole figure turns about the true centre of mass.
+Measured: a 40 N·s centred shove produces 0.09 rad/s of peak spin, against 0.40 rad/s for the
+same shove applied 0.3 m off centre. The offset is worth about 4× the rotation per unit of
+momentum. It is not the difference between rotating and not rotating.
+
+That correction is now pinned by `Env.aCentredImpulseImpartsNoAngularVelocityAtTheInstantItLands`,
+whose name says exactly how far the claim goes.
+
+**The actual cause.** The sweep's generated config contained only `max_episode_steps` and a
+`disturbance` block — written standalone rather than merged onto `env2d_backflip.json`. So the
+simulator ran with no imitation section, no motion clip, and the standing motor gains. The
+figure under test was not the one the checkpoint was trained for, and the "survival rate" was
+counting episodes that ran to a time limit while doing nothing in particular.
+
+### What the fix looks like
+
+`python/flight_test.py` merges the disturbance onto the real motion config, and every row
+carries a **witness**: the jump in angular velocity across the single step the shove lands on.
+If that column is flat across the sweep, the script prints a warning instead of a result.
+
+The witness is deliberately not "peak angular velocity over the episode". A backflip spins at
+several rad/s under its own power, so a peak reads the same with or without a disturbance — it
+would have certified the broken sweep as a working one.
+
+Two other things had to change to make the question answerable at all:
+
+- **`disturbance.offset_max`** — where the impulse lands, so it carries torque.
+- **`disturbance.at_step`** — one shove at a chosen instant, instead of a repeating beat. With a
+  repeating schedule the second shove arrives after the figure has landed, and the result stops
+  being a statement about mid-air recovery.
+
+### The survival curve
+
+Backflip policy, never trained against disturbance. Single off-centre shove (0.4 m) at control
+step 35, mid-flight. 24 episodes per row, deterministic actions, RSI off so every episode starts
+at the beginning of the clip and a full flip is 360°.
+
+| impulse | flips completed | mean rotation |
+|---|---|---|
+| 0 N·s | 100% | 358° |
+| 100 | 100% | 358° |
+| 150 | 96% | 362° |
+| 200 | 83% | 361° |
+| 300 | 38% | 348° |
+| 400 | 12% | 318° |
+
+That is a graded failure, which is what a working measurement looks like. Note the rotation
+column stays near 360° well past the point where completion falls off: the failures are not
+under-rotations, they are flips that finish the spin and cannot land it.
+
+### When it is vulnerable matters more than how hard
+
+Same 200 N·s shove, swept across the moment it arrives:
+
+| shove at step | flips completed | mean rotation |
+|---|---|---|
+| 15 | **0%** | 51° |
+| 25 | 62% | 292° |
+| 35 | 83% | 361° |
+| 45 | 42% | 281° |
+| 55 | 83% | 351° |
+| 65 | 54% | 348° |
+
+Step 15 is before takeoff. Hit there, the flip never happens — 51° of rotation is a stumble, not
+an aborted flip. This is the honest shape of the result: the policy is robust *in the air*, where
+it has already committed its angular momentum, and fragile during the launch, where it is still
+a standing figure trying to jump. Which is roughly true of a human gymnast.
+
+So the answer to "can you nudge it mid-air" is **yes, up to about 200 N·s**, and the answer to
+"can you shove it as it takes off" is **no**.
+
+### Re-checking the older numbers before putting them in a README
+
+Every headline figure was re-run before it went into the README, and two of them did not survive
+contact with a second seed.
+
+**"Standing: 40/40 episodes, return spread 0.2%."** True on seed 1. On seeds 0 and 2 it is 39/40,
+with the one failure ending at step 168 and dragging the return range to 429–4421. The original
+number was not wrong, it was one seed reported as though it were the result. The README now says
+39–40 of 40 across seeds 0, 1 and 2.
+
+**"Backflip: 0.72 s airborne, peak 1.72× rest."** Re-measured through `flight_test.py`, which
+reports the mean across episodes of each episode's peak: 0.71 s and 1.66×. The old figures were
+the maximum over episodes. Neither is wrong; only one of them is reproducible from a documented
+command, so that is the one quoted.
+
+Same for the jump, whose "1.368 m peak" came from a throwaway script and is now 1.27× rest with
+0.43 s of both feet clear, from `flight_test.py --config configs/env2d_jump_capture.json`.
+
+The rule that produced these corrections: a number belongs in the README only if a command in the
+README regenerates it. Two of six did not, and both moved when they were re-measured properly.
+
+### Training the backflip against shoves
+
+Fine-tuned from `imit_backflip_best.pt` for 10M further steps in `env2d_backflip_robust.json`:
+random shoves at 2% per control step, 40–260 N·s, applied up to 0.4 m off the pelvis centre.
+Everything else identical, so the comparison is the disturbance and nothing else.
+
+Same sweep as above, both policies, deterministic actions:
+
+| shove | undisturbed policy | shove-trained policy |
+|---|---|---|
+| 0 N·s | **100%** | 88% |
+| 100 | **100%** | 84% |
+| 200 | **83%** | 72% |
+| 300 | 38% | **60%** |
+| 400 | 12% | **33%** |
+
+A clean robustness-versus-performance trade with the crossover between 200 and 300 N·s. Nothing
+here is free: the shove-trained policy is measurably *worse at the backflip*, dropping 12 points
+at zero disturbance and rotating 343° where the original manages 358°.
+
+That is the expected shape, but the size of the cost is worth stating plainly rather than
+reporting only the half of the table that improved. The undisturbed policy remains the one in
+the README's headline GIF, because it is the better backflip.
+
+`env2d_backflip_robust_soft.json` is the one-variable follow-up: 20–150 N·s instead of 40–260,
+asking whether the cost is forced or an artefact of training almost entirely outside the range
+the policy could survive.
+
+### The run that trained for twenty minutes and saved nothing
+
+`imit_backflip_robust` finished having written only a `_latest` checkpoint. No `_best`.
+
+Resuming restored `meta.best_return` along with the weights, so the fine-tune inherited the
+undisturbed run's +42.70 watermark and then spent 10M steps between +26 and +32 — because the
+disturbed task genuinely pays less. The save condition never fired once.
+
+Returns are only comparable within one task, so the watermark is meaningless the moment the
+environment changes, which is the only reason anyone resumes into a different config. `train.py`
+now resets it on resume. The failure mode is worth naming: a run that trains correctly for
+twenty minutes and silently produces no best checkpoint looks, from the log, exactly like a run
+that worked.

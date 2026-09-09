@@ -1,0 +1,25 @@
+// Capture environment for the push-recovery GIF: a hard shove often enough that
+// one lands inside a few seconds of footage.
+//
+// env2d_push_capture.json is the measurement config - 55 N s every 90 control
+// steps, chosen so screenshots can be timed around a known disturbance. It
+// makes a poor demo: at 55 N s a policy trained to 130 N s barely reacts - measured, it absorbs
+// thirteen 115 N s shoves an episode without losing its feet - and 90 steps is
+// 1.5 s of a motionless figure between them. 135 N s sits at the edge of its
+// range, where the stagger is actually visible. The
+// numbers in docs/PROGRESS.md come from push_test.py sweeping the magnitude
+// properly, not from either of these.
+{
+  "max_episode_steps": 600,
+  "reset_noise": {
+    "root_angle": 0.05, "root_height": 0.01, "joint_angle": 0.05,
+    "linear_velocity": 0.1, "angular_velocity": 0.1
+  },
+  "disturbance": {
+    "interval_steps": 45,
+    "probability_per_step": 0.0,
+    "impulse_min": 135.0,
+    "impulse_max": 135.0,
+    "offset_max": 0.25
+  }
+}

@@ -9,6 +9,10 @@
 
 param(
     [Parameter(Mandatory = $true)][string]$Model,
+    # Environment config, which for an imitation policy is not optional: without
+    # it the simulator runs the standing task with the standing motor gains, and
+    # the checkpoint is evaluated against a figure it was never trained for.
+    [string]$EnvConfig = "",
     [string]$Shots = "",
     [int]$Frames = 6,
     [int]$FirstFrameStep = 150,
@@ -26,10 +30,20 @@ $Python = Join-Path $Root "venv\Scripts\python.exe"
 if (-not (Test-Path $Python)) { $Python = "python" }
 if (-not (Test-Path $Model)) { $Model = Join-Path $Root $Model }
 
+# Quoted, because the repo lives under a path with spaces in it and
+# -ArgumentList splits on whitespace.
+$configArgs = @()
+if ($EnvConfig -ne "") {
+    $configPath = if (Test-Path $EnvConfig) { $EnvConfig } else { Join-Path $Root $EnvConfig }
+    if (-not (Test-Path $configPath)) { throw "no such environment config: $EnvConfig" }
+    $configArgs = @("--config", "`"$configPath`"")
+    Write-Host "environment config: $configPath" -ForegroundColor Cyan
+}
+
 Write-Host "`n=== episode statistics ===" -ForegroundColor Cyan
 $server = Start-Process -FilePath $EnvExe `
-    -ArgumentList "--headless", "--quiet", "--port", "$Port", "--envs", "$Envs" `
-    -PassThru -WindowStyle Hidden
+    -ArgumentList (@("--headless", "--quiet", "--port", "$Port", "--envs", "$Envs") + $configArgs) `
+    -PassThru -WindowStyle Hidden -WorkingDirectory $Root
 Start-Sleep -Milliseconds 800
 try {
     & $Python (Join-Path $Root "python\test.py") --model $Model --port $Port --envs $Envs `
@@ -48,10 +62,11 @@ if ($shotDir -ne "" -and -not (Test-Path $shotDir)) {
 Write-Host "`n=== frames ===" -ForegroundColor Cyan
 $capturePort = $Port + 1
 $server = Start-Process -FilePath $EnvExe `
-    -ArgumentList "--quiet", "--port", "$capturePort", "--envs", "1", `
-                  "--capture", "$Shots.png", "--capture-after", "$FirstFrameStep", `
-                  "--capture-count", "$Frames", "--capture-every", "$FrameIntervalSteps" `
-    -PassThru -RedirectStandardOutput "$env:TEMP\aibf_capture.log"
+    -ArgumentList (@("--quiet", "--port", "$capturePort", "--envs", "1",
+                     "--capture", "`"$Shots.png`"", "--capture-after", "$FirstFrameStep",
+                     "--capture-count", "$Frames", "--capture-every", "$FrameIntervalSteps") +
+                   $configArgs) `
+    -PassThru -RedirectStandardOutput "$env:TEMP\aibf_capture.log" -WorkingDirectory $Root
 Start-Sleep -Milliseconds 900
 try {
     # The server exits after the last capture, which ends this client too. That

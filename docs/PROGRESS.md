@@ -853,3 +853,81 @@ The machine has 32 logical cores, so motions now train concurrently rather than 
   simply undertraining has not been separated.
 - Root-error thresholds are hand-set per motion (0.35 standing, 0.45 jump, 0.60 backflip),
   scaled by how far each motion's root actually travels. Principled, but not derived.
+
+---
+
+## M8 — the backflip
+
+**Status:** the backflip works. Jump and forward roll are being retrained after the jump failed
+in an instructive way.
+
+### The backflip
+
+12M environment steps, ~19 minutes, trained concurrently with two other motions.
+
+A still frame cannot distinguish a backflip from a tuck-and-untuck, and `sin`/`cos` of the
+pelvis angle cannot either — both are periodic. So the pelvis angle is *unwrapped* across the
+episode and accumulated:
+
+| step | pelvis / rest | accumulated rotation | feet down |
+|---|---|---|---|
+| 12 | 0.774 | 6° | 2 |
+| 24 | 1.196 | 43° | **0** |
+| 42 | 1.708 | **177°** | 0 |
+| 60 | 1.049 | 328° | 0 |
+| 72 | 0.880 | **361°** | 2 |
+
+Consistency over 20 episodes with a deterministic policy:
+
+| | |
+|---|---|
+| Rotation | mean **360°**, range 355–364° |
+| Peak pelvis height | mean 1.69x, range 1.55–1.89x rest |
+| Airborne | 43.5 steps (0.72 s) |
+| **Full rotation with genuine airtime** | **20 / 20** |
+
+Rendered and inspected: loaded crouch, takeoff, fully inverted at the peak with the head below
+the pelvis, landing on both feet.
+
+**It is not closely imitating the reference, and that distinction matters.** `pose_match` is
+0.117 and `end_effector_match` 0.113, against `root_match` 0.729 and `com_match` 0.970. The
+policy matched the *trajectory* the reference describes — crouch, launch, invert, rotate, land —
+and found its own limb configuration to do it with rather than copying the authored arm and leg
+angles. That is a physically simulated backflip; it is not "tracks the reference closely".
+
+It also jumps higher than asked (1.72 against 1.46), consistent with the over-energetic takeoff
+the PD preview flagged before any training ran.
+
+### The jump failed, and the reason is the interesting part
+
+30/30 episodes "completed the clip", `root_match` 0.890, `com_match` 0.992, `pose_match` 0.532.
+Every number looks acceptable. Rendered, the figure **rises onto its toes and raises its arms**.
+Peak pelvis 1.069 against a reference peak of 1.33, with both feet still on the ground.
+
+Two things hid it:
+
+1. **Episode averaging.** The reference is only high for about 20 of 75 steps, so a failure
+   concentrated in a short window disappears into the mean. `root_match` 0.890 corresponds to an
+   average height error of 7.6 cm while the peak is missed by 26 cm.
+2. **The termination was too loose.** At a 0.45 m root threshold, never leaving the ground never
+   terminates — so nothing pressured the policy to jump.
+
+The backflip escaped both because **a 360° rotation cannot be faked by standing still**. The
+motion is self-verifying in a way the jump is not.
+
+This is also evidence the figure is capable: the *backflip* policy reaches 1.72 m, so jumping is
+not the limitation. The jump policy simply was never made to. Retraining with the root threshold
+at 0.15.
+
+### The lesson, stated once
+
+Across M7 and M8 the same thing has now happened three times: **a reward term flags a problem and
+gets ignored, and only a termination changes behaviour.** The squat's `root_match` sat at 0.368
+while the figure lay on its back; the jump's peak height was missed while the average looked
+fine. In both cases raising a weight was the tempting fix and the termination was the real one.
+
+### Not attempted
+
+A **cartwheel** is a frontal-plane motion. A sagittal 2D figure has no frontal plane, so it
+cannot be represented here at all — it is not a hard case, it is an impossible one. It waits for
+the 3D humanoid.

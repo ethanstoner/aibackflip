@@ -39,7 +39,7 @@
   "imitation": {
     "motion": "motions/jump.json",
     "enabled": true,
-    "reference_state_init": true,
+    "reference_state_init": false,
 
     // Joint deviation ends an episode that is not coming back.
     "early_termination_pose_error": 0.9,
@@ -49,7 +49,7 @@
     // back can hold the reference pose perfectly - the first squat policy
     // trained here did exactly that, scoring pose_match 0.855 while flat on the
     // ground with its feet in the air.
-    "early_termination_root_error": 0.15,
+    "early_termination_root_error": 0.45,
 
     "end_episode_at_motion_end": true,
 

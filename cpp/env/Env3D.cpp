@@ -43,6 +43,31 @@ EnvConfig3D EnvConfig3D::fromJson(const Json& json) {
     config.pushImpulseMax = push["impulse_max"].real(config.pushImpulseMax);
     config.pushOffsetMax = push["offset_max"].real(config.pushOffsetMax);
 
+    const Json& imitation = json["imitation"];
+    if (imitation.isObject()) {
+        ImitationSettings3D& settings = config.imitation;
+        settings.motionPath = imitation["motion"].string(settings.motionPath);
+        settings.enabled = imitation["enabled"].boolean(!settings.motionPath.empty());
+        settings.referenceStateInit =
+            imitation["reference_state_init"].boolean(settings.referenceStateInit);
+        settings.earlyTerminationPoseError =
+            imitation["early_termination_pose_error"].real(settings.earlyTerminationPoseError);
+        settings.earlyTerminationRootError =
+            imitation["early_termination_root_error"].real(settings.earlyTerminationRootError);
+        settings.endEpisodeAtMotionEnd =
+            imitation["end_episode_at_motion_end"].boolean(settings.endEpisodeAtMotionEnd);
+
+        const Json& scales = imitation["scales"];
+        settings.scales.pose = scales["pose"].real(settings.scales.pose);
+        settings.scales.jointVelocity =
+            scales["joint_velocity"].real(settings.scales.jointVelocity);
+        settings.scales.endEffector = scales["end_effector"].real(settings.scales.endEffector);
+        settings.scales.root = scales["root"].real(settings.scales.root);
+        settings.scales.com = scales["com"].real(settings.scales.com);
+        settings.scales.rootAngleWeight =
+            scales["root_angle_weight"].real(settings.scales.rootAngleWeight);
+    }
+
     return config;
 }
 
@@ -88,6 +113,25 @@ Json EnvConfig3D::toJson() const {
     push.set("offset_max", Json(double(pushOffsetMax)));
     root.set("disturbance", std::move(push));
 
+    Json imitationJson = Json::object();
+    imitationJson.set("motion", Json(imitation.motionPath));
+    imitationJson.set("enabled", Json(imitation.enabled));
+    imitationJson.set("reference_state_init", Json(imitation.referenceStateInit));
+    imitationJson.set("early_termination_pose_error",
+                      Json(double(imitation.earlyTerminationPoseError)));
+    imitationJson.set("early_termination_root_error",
+                      Json(double(imitation.earlyTerminationRootError)));
+    imitationJson.set("end_episode_at_motion_end", Json(imitation.endEpisodeAtMotionEnd));
+    Json scalesJson = Json::object();
+    scalesJson.set("pose", Json(double(imitation.scales.pose)));
+    scalesJson.set("joint_velocity", Json(double(imitation.scales.jointVelocity)));
+    scalesJson.set("end_effector", Json(double(imitation.scales.endEffector)));
+    scalesJson.set("root", Json(double(imitation.scales.root)));
+    scalesJson.set("com", Json(double(imitation.scales.com)));
+    scalesJson.set("root_angle_weight", Json(double(imitation.scales.rootAngleWeight)));
+    imitationJson.set("scales", std::move(scalesJson));
+    root.set("imitation", std::move(imitationJson));
+
     return root;
 }
 
@@ -124,6 +168,33 @@ void Env3D::initialize(const EnvConfig3D& config, uint64_t seed) {
     scales_ = ObservationScales3D::fromConfig(config_.humanoid);
     lastActions_.assign(static_cast<size_t>(actionDim()), Real(0));
 
+    fkPositions_.assign(kLinkCount, Vec3(0, 0, 0));
+    fkOrientations_.assign(kLinkCount, Quat::identity());
+    fkVelocities_.assign(kLinkCount, Vec3(0, 0, 0));
+    fkAngularVelocities_.assign(kLinkCount, Vec3(0, 0, 0));
+    fkJointRates_.assign(kJointCount, Vec3(0, 0, 0));
+
+    motionLoaded_ = false;
+    if (config_.imitation.enabled && !config_.imitation.motionPath.empty()) {
+        std::string error;
+        motion_ = Motion3D::readFile(config_.imitation.motionPath, &error);
+        // A missing or broken clip disables imitation rather than silently
+        // scoring against an empty reference, which would make every tracking
+        // term report a plausible number for a motion that does not exist.
+        motionLoaded_ = error.empty() && !motion_.keyframes.empty();
+        if (!motionLoaded_) {
+            std::fprintf(stderr, "imitation disabled, could not load %s: %s\n",
+                         config_.imitation.motionPath.c_str(),
+                         error.empty() ? "empty clip" : error.c_str());
+        } else {
+            motion_.clampToLimits(config_.humanoid);
+        }
+    }
+    targets_.jointRotations.assign(kJointCount, Quat::identity());
+    targets_.jointRates.assign(kJointCount, Vec3(0, 0, 0));
+    targets_.endEffectors.assign(sizeof(kEndEffectors) / sizeof(kEndEffectors[0]),
+                                 Vec3(0, 0, 0));
+
     reset();
 }
 
@@ -133,8 +204,21 @@ void Env3D::reset() {
     truncated_ = false;
     terminationReason_ = "";
     phase_ = 0;
+    motionTime_ = 0;
     pushCount_ = 0;
     std::fill(lastActions_.begin(), lastActions_.end(), Real(0));
+
+    if (motionLoaded_) {
+        const Real startPhase =
+            config_.imitation.referenceStateInit ? rng_.uniform(Real(0), Real(1)) : Real(0);
+        applyReferenceStateInit(startPhase);
+        figure_.relaxToRestPose(world_);
+        world_.clearContactCache();
+        world_.resetStats();
+        updateImitationTargets();
+        world_.refreshContacts();
+        return;
+    }
 
     // A small random tilt about a random *horizontal* axis. In 2D there was only
     // one axis to tilt about; here the figure can be nudged forwards, backwards
@@ -189,6 +273,17 @@ void Env3D::step(const Real* actions, int count) {
     for (int i = 0; i < config_.substepsPerControl; ++i) world_.step(dt);
 
     ++episodeStep_;
+
+    if (motionLoaded_) {
+        motionTime_ += Real(1) / config_.controlHz();
+        const Real duration = motion_.duration();
+        if (duration > Real(0)) {
+            phase_ = motion_.loop ? std::fmod(motionTime_ / duration, Real(1))
+                                  : clamp(motionTime_ / duration, Real(0), Real(1));
+        }
+        updateImitationTargets();
+    }
+
     evaluateTermination();
 }
 
@@ -199,6 +294,84 @@ void Env3D::writeObservation(Real* out) const {
 void Env3D::writeRewardTerms(Real* out) const {
     writeRewardTerms3D(world_, figure_, scales_, lastActions_.data(),
                        static_cast<int>(lastActions_.size()), !terminated_, out);
+    // Written second, because writeRewardTerms3D zeroes the whole vector first.
+    writeImitationTerms3D(world_, figure_, targets_, config_.imitation.scales, out);
+}
+
+Real Env3D::poseError() const { return poseError3D(world_, figure_, targets_); }
+
+Real Env3D::rootError() const {
+    return rootError3D(world_, figure_, targets_, config_.imitation.scales.rootAngleWeight);
+}
+
+void Env3D::updateImitationTargets() {
+    targets_.valid = false;
+    if (!motionLoaded_) return;
+
+    const MotionPose3D pose = motion_.sample(motionTime_);
+    Vec3 rootVelocity, rootSpin;
+    motion_.sampleVelocity(motionTime_, rootVelocity, rootSpin, fkJointRates_);
+
+    figure_.forwardKinematics(world_, pose.rootPosition, pose.rootOrientation,
+                              pose.jointRotations.data(), fkPositions_.data(),
+                              fkOrientations_.data());
+
+    targets_.jointRotations = pose.jointRotations;
+    targets_.jointRates = fkJointRates_;
+    targets_.rootHeight = pose.rootPosition.y;
+    targets_.rootOrientation = pose.rootOrientation;
+
+    // Relative to the root, so the term measures limb configuration rather than
+    // where the figure happens to be.
+    const size_t effectors = sizeof(kEndEffectors) / sizeof(kEndEffectors[0]);
+    targets_.endEffectors.resize(effectors);
+    for (size_t e = 0; e < effectors; ++e) {
+        targets_.endEffectors[e] = fkPositions_[kEndEffectors[e]] - pose.rootPosition;
+    }
+
+    Vec3 weighted(0, 0, 0);
+    Real totalMass = 0;
+    for (int i = 0; i < kLinkCount; ++i) {
+        const Real mass = config_.humanoid.links[static_cast<size_t>(i)].mass;
+        weighted += fkPositions_[i] * mass;
+        totalMass += mass;
+    }
+    targets_.comOffset =
+        (totalMass > Real(0) ? weighted / totalMass : pose.rootPosition) - pose.rootPosition;
+
+    targets_.valid = true;
+}
+
+void Env3D::applyReferenceStateInit(Real phase) {
+    const Real duration = motion_.duration();
+    motionTime_ = phase * duration;
+    phase_ = phase;
+
+    const MotionPose3D pose = motion_.sample(motionTime_);
+    Vec3 rootVelocity, rootSpin;
+    motion_.sampleVelocity(motionTime_, rootVelocity, rootSpin, fkJointRates_);
+
+    figure_.forwardKinematics(world_, pose.rootPosition, pose.rootOrientation,
+                              pose.jointRotations.data(), fkPositions_.data(),
+                              fkOrientations_.data());
+    figure_.forwardKinematicsVelocity(world_, rootVelocity, rootSpin, fkJointRates_.data(),
+                                      fkPositions_.data(), fkOrientations_.data(),
+                                      fkVelocities_.data(), fkAngularVelocities_.data());
+
+    // Small noise on top, so a policy cannot memorise a finite set of starting
+    // states. The reference pose itself is exact; only the perturbation is
+    // random.
+    for (int i = 0; i < kLinkCount; ++i) {
+        fkVelocities_[i] +=
+            Vec3(rng_.uniform(-1, 1), rng_.uniform(-1, 1), rng_.uniform(-1, 1)) *
+            config_.resetNoise.linearVelocity;
+        fkAngularVelocities_[i] +=
+            Vec3(rng_.uniform(-1, 1), rng_.uniform(-1, 1), rng_.uniform(-1, 1)) *
+            config_.resetNoise.angularVelocity;
+    }
+
+    figure_.applyPose(world_, fkPositions_.data(), fkOrientations_.data(), fkVelocities_.data(),
+                      fkAngularVelocities_.data());
 }
 
 void Env3D::evaluateTermination() {
@@ -213,6 +386,38 @@ void Env3D::evaluateTermination() {
             terminationReason_ = "non_finite";
             return;
         }
+    }
+
+    // While imitating, the reference decides what counts as failure. The
+    // postural tests are switched off: a backflip spends half its time upside
+    // down with the head near the floor, which every one of them would call a
+    // fall.
+    if (motionLoaded_ && targets_.valid) {
+        const ImitationSettings3D& settings = config_.imitation;
+        if (settings.earlyTerminationPoseError > Real(0) &&
+            poseError() > settings.earlyTerminationPoseError) {
+            terminated_ = true;
+            terminationReason_ = "lost_the_motion";
+            return;
+        }
+        if (settings.earlyTerminationRootError > Real(0) &&
+            rootError() > settings.earlyTerminationRootError) {
+            terminated_ = true;
+            terminationReason_ = "root_off_reference";
+            return;
+        }
+        if (settings.endEpisodeAtMotionEnd && !motion_.loop &&
+            motionTime_ >= motion_.duration()) {
+            // Finishing the clip is a success, so it is truncation.
+            truncated_ = true;
+            terminationReason_ = "motion_complete";
+            return;
+        }
+        if (episodeStep_ >= config_.maxEpisodeSteps) {
+            truncated_ = true;
+            terminationReason_ = "time_limit";
+        }
+        return;
     }
 
     const Humanoid3DConfig& cfg = config_.humanoid;

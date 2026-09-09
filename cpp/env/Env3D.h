@@ -12,6 +12,7 @@
 #include "core/Rng.h"
 #include "humanoid/Observation3D.h"
 #include "humanoid/RewardTerms3D.h"
+#include "motion/Motion3D.h"
 
 namespace aibf {
 
@@ -21,6 +22,39 @@ struct ResetNoise3D {
     Real jointAngle = Real(0.08);
     Real linearVelocity = Real(0.15);
     Real angularVelocity = Real(0.15);
+};
+
+struct ImitationSettings3D {
+    std::string motionPath;
+    bool enabled = false;
+
+    // Reference State Initialization: start each episode at a random phase of
+    // the clip, with the velocities belonging to that phase.
+    //
+    // Not a refinement. Without it a policy has to master the takeoff before it
+    // ever observes the landing, and for a backflip the takeoff is only worth
+    // anything if the landing already works. It is the single reason the 2D
+    // backflip trained at all, and nothing about 3D makes it less necessary.
+    bool referenceStateInit = true;
+
+    // Ends an episode once RMS joint error exceeds this, in radians; 0 disables.
+    Real earlyTerminationPoseError = Real(1.0);
+
+    // Ends an episode once the *root* has drifted this far, as
+    // sqrt(dHeight^2 + rootAngleWeight * dAngle^2) in metres; 0 disables.
+    //
+    // This is what makes imitation mean anything rather than a refinement of
+    // the pose test. Joint rotations are root-relative, so a figure lying on its
+    // back can hold the reference pose exactly, and the first 2D squat policy
+    // did precisely that, reaching pose_match 0.855 while flat on the ground
+    // with its feet in the air.
+    Real earlyTerminationRootError = Real(0.6);
+
+    // Finishing a non-looping clip is a success, so it is reported as
+    // truncation rather than termination.
+    bool endEpisodeAtMotionEnd = true;
+
+    ImitationScales3D scales;
 };
 
 struct EnvConfig3D {
@@ -45,6 +79,8 @@ struct EnvConfig3D {
     Real pushImpulseMin = 0;
     Real pushImpulseMax = 0;
     Real pushOffsetMax = 0;
+
+    ImitationSettings3D imitation;
 
     Real controlHz() const {
         return substepsPerControl > 0 ? physicsHz / Real(substepsPerControl) : physicsHz;
@@ -96,6 +132,15 @@ public:
     Real phase() const { return phase_; }
     void setPhase(Real phase) { phase_ = phase; }
 
+    bool hasMotion() const { return motionLoaded_; }
+    const Motion3D& motion() const { return motion_; }
+    const ImitationTargets3D& imitationTargets() const { return targets_; }
+    // RMS joint rotation error against the reference, radians. Zero without a
+    // clip.
+    Real poseError() const;
+    // Root deviation from the reference: height and orientation combined.
+    Real rootError() const;
+
     // Applies an impulse to the pelvis. `offset` is along the torso in the
     // pelvis's own frame; a non-zero value carries torque as well as momentum,
     // which is the only kind of disturbance that can perturb free flight.
@@ -104,6 +149,8 @@ public:
 private:
     void evaluateTermination();
     void maybeDisturb();
+    void updateImitationTargets();
+    void applyReferenceStateInit(Real phase);
 
     EnvConfig3D config_;
     World3D world_;
@@ -118,6 +165,19 @@ private:
     const char* terminationReason_ = "";
     Real phase_ = 0;
     int pushCount_ = 0;
+
+    Motion3D motion_;
+    bool motionLoaded_ = false;
+    Real motionTime_ = 0;
+    ImitationTargets3D targets_;
+
+    // Scratch for expanding a reference pose, kept as members so a control step
+    // does not allocate.
+    mutable std::vector<Vec3> fkPositions_;
+    mutable std::vector<Quat> fkOrientations_;
+    mutable std::vector<Vec3> fkVelocities_;
+    mutable std::vector<Vec3> fkAngularVelocities_;
+    mutable std::vector<Vec3> fkJointRates_;
 };
 
 }  // namespace aibf

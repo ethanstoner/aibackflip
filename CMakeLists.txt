@@ -130,6 +130,16 @@ target_link_libraries(aibf_fixture PRIVATE aibf_env_lib)
 add_executable(aibf_motions cpp/tools/make_motions.cpp)
 target_link_libraries(aibf_motions PRIVATE aibf_env_lib)
 
+# The 3D counterpart. Root heights are solved by forward kinematics so an
+# authored crouch actually reaches the floor.
+add_executable(aibf_motions3d cpp/tools/make_motions3d.cpp)
+target_link_libraries(aibf_motions3d PRIVATE aibf_env_lib)
+
+# Plays a 3D reference motion, kinematically or through the motors. The PD
+# preview is the cheap check that a clip is trackable at all.
+add_executable(aibf_view3d cpp/tools/view3d.cpp)
+target_link_libraries(aibf_view3d PRIVATE aibf_env_lib aibf_engine)
+
 add_executable(aibf_env cpp/tools/envserver.cpp)
 target_link_libraries(aibf_env PRIVATE aibf_env_lib aibf_engine)
 target_compile_definitions(aibf_env PRIVATE AIBF_WITH_RENDERER)

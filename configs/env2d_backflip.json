@@ -1,0 +1,29 @@
+// Imitation environment for the "backflip" reference motion.
+//
+// Reference State Initialization is on: each episode starts at a random phase
+// of the clip, with the velocities that belong to that phase. Without it the
+// policy must master the opening before it ever observes the ending.
+//
+// Episodes end early once RMS joint error exceeds the threshold. An episode
+// that has drifted that far is not recovering, and letting it run fills the
+// rollout with states the motion never visits.
+{
+  "max_episode_steps": 160,
+
+  // Perturbation around the reference rather than around a rest pose.
+  "reset_noise": {
+    "root_angle": 0.05,
+    "root_height": 0.02,
+    "joint_angle": 0.06,
+    "linear_velocity": 0.0,
+    "angular_velocity": 0.0
+  },
+
+  "imitation": {
+    "motion": "motions/backflip.json",
+    "enabled": true,
+    "reference_state_init": true,
+    "early_termination_pose_error": 1,
+    "end_episode_at_motion_end": true
+  }
+}

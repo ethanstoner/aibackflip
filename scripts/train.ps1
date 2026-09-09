@@ -37,7 +37,11 @@ if ($EnvConfig -ne "") {
 }
 
 Write-Host "starting the environment server on port $Port with $Envs environments" -ForegroundColor Cyan
-$server = Start-Process -FilePath $EnvExe -ArgumentList $serverArgs -PassThru -WindowStyle Hidden
+# Launched from the repo root so relative paths inside an environment config -
+# a motion clip, most importantly - resolve the same way regardless of where
+# this script was invoked from.
+$server = Start-Process -FilePath $EnvExe -ArgumentList $serverArgs -PassThru `
+    -WindowStyle Hidden -WorkingDirectory $Root
 Start-Sleep -Milliseconds 800
 
 if ($server.HasExited) { throw "the environment server exited immediately" }

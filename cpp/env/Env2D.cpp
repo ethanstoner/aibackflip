@@ -208,10 +208,13 @@ void Env2D::reset() {
     pushCount_ = 0;
     motionTime_ = motionLoaded_ ? motion_.timeAt(startPhase) : Real(0);
 
-    // One settle step so the first observation reports real contact state
-    // rather than "nothing is touching anything", which it would otherwise do
-    // because no collision pass has run since the figure was placed.
-    world_.step(config_.physicsDt());
+    // Populate contact state so the first observation does not report "nothing
+    // is touching anything". This runs collision detection only: stepping the
+    // world here would advance the physics by a substep, and the motors'
+    // damping term would brake the velocities that reference state
+    // initialization had just set - which for an episode starting mid-motion
+    // discards the entire point of starting it there.
+    world_.refreshContacts();
     updateImitationTargets();
 }
 

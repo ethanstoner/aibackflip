@@ -86,6 +86,16 @@ public:
     // Advances one fixed substep.
     void step(Real dt);
 
+    // Rebuilds the contact manifolds without integrating or solving anything.
+    //
+    // Exists for reset: contact state has to be populated before the first
+    // observation is read, and stepping the world to get it silently advances
+    // the physics. That is not harmless - the joint motors' damping term brakes
+    // whatever initial velocity was just set, which for a reference state
+    // initialised mid-motion destroys the velocities that were the point of
+    // setting it there.
+    void refreshContacts();
+
     // True while any contact touches this body, computed from the manifolds of
     // the most recent step. Used for the foot-contact observation.
     bool hasContact(int32_t bodyIndex) const;

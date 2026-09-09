@@ -97,6 +97,20 @@ void World2D::step(Real dt) {
     checkForInstability();
 }
 
+void World2D::refreshContacts() {
+    generateManifolds(manifolds_);
+    stats_.contactCount = 0;
+    stats_.manifoldCount = static_cast<int>(manifolds_.size());
+    Real deepest = 0;
+    for (const Manifold& m : manifolds_) {
+        stats_.contactCount += m.pointCount;
+        for (int i = 0; i < m.pointCount; ++i) {
+            deepest = std::max(deepest, -m.points[i].separation);
+        }
+    }
+    stats_.maxPenetration = deepest;
+}
+
 void World2D::integrateVelocities(Real dt) {
     for (RigidBody2D& b : bodies_) {
         if (b.isStatic || b.invMass == Real(0)) continue;

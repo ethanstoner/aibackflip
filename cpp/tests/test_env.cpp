@@ -1,4 +1,6 @@
 #include <cmath>
+#include <filesystem>
+#include <system_error>
 #include <vector>
 
 #include "core/Test.h"
@@ -400,6 +402,284 @@ TEST(Env, aRandomPolicyNeverBreaksTheSimulation) {
         }
     }
     CHECK(episodes > 10);  // it really did run many episodes, not one long one
+}
+
+// ---------------------------------------------------------------- imitation
+
+namespace {
+
+// A short clip that actually moves, so reference velocities are non-zero and a
+// velocity comparison means something.
+Motion2D testClip(const Humanoid2D& figure) {
+    Motion2D motion;
+    motion.name = "test_squat";
+    motion.loop = true;
+    for (int i = 0; i < 3; ++i) {
+        MotionKeyframe key;
+        key.time = Real(i) * Real(0.6);
+        key.jointAngles.assign(kJointCount, Real(0));
+        if (i == 1) {
+            key.jointAngles[kHipL] = Real(0.9);
+            key.jointAngles[kHipR] = Real(0.9);
+            key.jointAngles[kKneeL] = Real(-1.5);
+            key.jointAngles[kKneeR] = Real(-1.5);
+            key.jointAngles[kAnkleL] = Real(0.4);
+            key.jointAngles[kAnkleR] = Real(0.4);
+        }
+        key.rootPosition = Vec2(0, figure.groundedRootHeight(0, key.jointAngles.data()));
+        motion.insertKeyframe(key);
+    }
+    return motion;
+}
+
+// Env2D loads a motion by path, so these have to live on disk. Written to the
+// system temp directory rather than the working directory, so running the tests
+// does not leave files wherever they happened to be run from.
+std::string tempClipPath(const std::string& name) {
+    std::error_code error;
+    const std::filesystem::path directory = std::filesystem::temp_directory_path(error);
+    return (error ? std::filesystem::path(".") : directory).string() + "/aibf_test_" + name +
+           ".json";
+}
+
+std::string writeTestClip(const Humanoid2D& figure) {
+    const std::string path = tempClipPath("clip");
+    testClip(figure).writeFile(path);
+    return path;
+}
+
+}  // namespace
+
+TEST(Imitation, forwardKinematicsVelocityReproducesTheJointRates) {
+    // The foundation reference state initialization stands on. If this is wrong,
+    // an episode started mid-motion begins with velocities that do not belong to
+    // the pose it was placed in.
+    World2D world;
+    Humanoid2D figure;
+    figure.build(world, Humanoid2DConfig::defaults());
+
+    Rng rng(5);
+    Real angles[kJointCount];
+    Real velocities[kJointCount];
+    for (int j = 0; j < kJointCount; ++j) {
+        const JointConfig& jc = Humanoid2DConfig::defaults().joints[static_cast<size_t>(j)];
+        angles[j] = rng.uniform(jc.lowerLimit * Real(0.5), jc.upperLimit * Real(0.5));
+        velocities[j] = rng.uniform(Real(-3), Real(3));
+    }
+    const Vec2 rootVelocity(Real(0.4), Real(-1.1));
+    const Real rootAngularVelocity = Real(0.7);
+
+    figure.setPoseAndVelocity(world, Vec2(0, Real(1.1)), Real(0.2), angles, rootVelocity,
+                              rootAngularVelocity, velocities);
+
+    CHECK_NEAR(figure.link(world, kPelvis).angularVelocity, rootAngularVelocity, 1e-5);
+    CHECK_VEC2_NEAR(figure.link(world, kPelvis).velocity, rootVelocity.x, rootVelocity.y, 1e-5);
+    for (int j = 0; j < kJointCount; ++j) {
+        CHECK_NEAR(figure.jointVelocity(world, j), velocities[j], 1e-4);
+        CHECK_NEAR(figure.jointAngle(world, j), angles[j], 1e-4);
+    }
+}
+
+TEST(Imitation, resetLeavesTheFigureOnTheReferenceInBothPoseAndVelocity) {
+    // This is the test that catches a reset which quietly advances the physics.
+    // A settle step there is not harmless: the motors' damping term brakes the
+    // velocities reference state initialization had just set, and an episode
+    // starting mid-motion loses the entire point of starting there.
+    World2D scratchWorld;
+    Humanoid2D scratchFigure;
+    scratchFigure.build(scratchWorld, Humanoid2DConfig::defaults());
+
+    EnvConfig config;
+    config.maxEpisodeSteps = 200;
+    config.resetNoise = ResetNoise{};  // isolate the reference from the noise
+    config.imitation.enabled = true;
+    config.imitation.motionPath = writeTestClip(scratchFigure);
+    config.imitation.referenceStateInit = true;
+
+    Env2D env;
+    env.initialize(config, 11);
+    CHECK(env.hasMotion());
+
+    Rng rng(3);
+    for (int trial = 0; trial < 12; ++trial) {
+        env.reset();
+        const ImitationTargets& targets = env.imitationTargets();
+        CHECK(targets.valid);
+
+        // Pose lands on the reference.
+        CHECK(env.poseError() < Real(0.02));
+
+        // And so do the velocities, which is the part a settle step destroys.
+        Real worstVelocityError = 0;
+        for (int j = 0; j < kJointCount; ++j) {
+            const Real error = std::abs(env.figure().jointVelocity(env.world(), j) -
+                                        targets.jointVelocities[static_cast<size_t>(j)]);
+            worstVelocityError = std::max(worstVelocityError, error);
+        }
+        CHECK(worstVelocityError < Real(0.05));
+        (void)rng;
+    }
+}
+
+TEST(Imitation, referenceStateInitStartsEpisodesAtDifferentPhases) {
+    World2D scratchWorld;
+    Humanoid2D scratchFigure;
+    scratchFigure.build(scratchWorld, Humanoid2DConfig::defaults());
+
+    EnvConfig config;
+    config.imitation.enabled = true;
+    config.imitation.motionPath = writeTestClip(scratchFigure);
+    config.imitation.referenceStateInit = true;
+
+    Env2D env;
+    env.initialize(config, 7);
+    Real lowest = Real(1), highest = Real(0);
+    for (int i = 0; i < 40; ++i) {
+        env.reset();
+        lowest = std::min(lowest, env.phase());
+        highest = std::max(highest, env.phase());
+    }
+    // Without this spread, the back half of an acrobatic motion never gets a
+    // gradient until the front half is already solved.
+    CHECK(lowest < Real(0.2));
+    CHECK(highest > Real(0.8));
+
+    // Turning it off pins every episode to the start.
+    config.imitation.referenceStateInit = false;
+    Env2D fixed;
+    fixed.initialize(config, 7);
+    for (int i = 0; i < 5; ++i) {
+        fixed.reset();
+        CHECK_NEAR(fixed.phase(), 0.0, 1e-6);
+    }
+}
+
+TEST(Imitation, trackingTermsFallAsTheFigureDriftsFromTheReference) {
+    World2D scratchWorld;
+    Humanoid2D scratchFigure;
+    scratchFigure.build(scratchWorld, Humanoid2DConfig::defaults());
+
+    EnvConfig config;
+    config.maxEpisodeSteps = 400;
+    config.resetNoise = ResetNoise{};
+    config.imitation.enabled = true;
+    config.imitation.motionPath = writeTestClip(scratchFigure);
+    config.imitation.earlyTerminationPoseError = 0;  // let it drift freely
+
+    Env2D env;
+    env.initialize(config, 2);
+    env.reset();
+
+    std::vector<Real> onReference(Env2D::rewardTermCount());
+    env.writeRewardTerms(onReference.data());
+    CHECK(onReference[kTermPoseMatch] > Real(0.9));
+    CHECK(onReference[kTermRootMatch] > Real(0.9));
+    CHECK(onReference[kTermComMatch] > Real(0.9));
+    CHECK(onReference[kTermEndEffectorMatch] > Real(0.7));
+
+    // A zero action commands the rest pose, so the figure abandons the squat.
+    const std::vector<Real> zeros(Env2D::actionDim(), Real(0));
+    for (int i = 0; i < 40; ++i) env.step(zeros.data(), Env2D::actionDim());
+
+    std::vector<Real> drifted(Env2D::rewardTermCount());
+    env.writeRewardTerms(drifted.data());
+    CHECK(drifted[kTermPoseMatch] < onReference[kTermPoseMatch] - Real(0.2));
+    CHECK(env.poseError() > Real(0.1));
+}
+
+TEST(Imitation, aLostMotionTerminatesAndFinishingItTruncates) {
+    World2D scratchWorld;
+    Humanoid2D scratchFigure;
+    scratchFigure.build(scratchWorld, Humanoid2DConfig::defaults());
+
+    // Losing the motion is a failure.
+    {
+        EnvConfig config;
+        config.maxEpisodeSteps = 400;
+        config.resetNoise = ResetNoise{};
+        config.imitation.enabled = true;
+        config.imitation.motionPath = writeTestClip(scratchFigure);
+        config.imitation.referenceStateInit = false;
+        config.imitation.earlyTerminationPoseError = Real(0.5);
+
+        Env2D env;
+        env.initialize(config, 4);
+        const std::vector<Real> zeros(Env2D::actionDim(), Real(0));
+        while (!env.done() && env.episodeStep() < 400) {
+            env.step(zeros.data(), Env2D::actionDim());
+        }
+        CHECK(env.terminated());
+        CHECK(std::string(env.terminationReason()) == "lost_the_motion");
+    }
+
+    // Reaching the end of a one-shot clip is a success, so it truncates and the
+    // value function bootstraps through it rather than treating it as death.
+    {
+        Motion2D oneShot = testClip(scratchFigure);
+        oneShot.loop = false;
+        const std::string oneShotPath = tempClipPath("oneshot");
+        oneShot.writeFile(oneShotPath);
+
+        EnvConfig config;
+        config.maxEpisodeSteps = 4000;
+        config.resetNoise = ResetNoise{};
+        config.imitation.enabled = true;
+        config.imitation.motionPath = oneShotPath;
+        config.imitation.referenceStateInit = false;
+        config.imitation.earlyTerminationPoseError = 0;  // never lose it
+
+        Env2D env;
+        env.initialize(config, 4);
+        const std::vector<Real> zeros(Env2D::actionDim(), Real(0));
+        while (!env.done() && env.episodeStep() < 4000) {
+            env.step(zeros.data(), Env2D::actionDim());
+        }
+        CHECK(env.truncated());
+        CHECK(!env.terminated());
+        CHECK(std::string(env.terminationReason()) == "motion_complete");
+    }
+}
+
+TEST(Imitation, posturalTerminationsAreDisabledWhileImitating) {
+    // Halfway through a backflip the figure is upside down at knee height, which
+    // pelvis_low, head_low and chest_fallen would all call a failure. Only
+    // deviation from the reference may end an imitation episode.
+    World2D scratchWorld;
+    Humanoid2D scratchFigure;
+    scratchFigure.build(scratchWorld, Humanoid2DConfig::defaults());
+
+    Motion2D inverted;
+    inverted.name = "inverted";
+    inverted.loop = true;
+    for (int i = 0; i < 3; ++i) {
+        MotionKeyframe key;
+        key.time = Real(i) * Real(0.5);
+        key.jointAngles.assign(kJointCount, Real(0));
+        key.rootAngle = Real(i) * kPi;  // rotates through inversion
+        key.rootPosition = Vec2(0, Real(0.6));
+        inverted.insertKeyframe(key);
+    }
+    const std::string invertedPath = tempClipPath("inverted");
+    inverted.writeFile(invertedPath);
+
+    EnvConfig config;
+    config.maxEpisodeSteps = 30;
+    config.resetNoise = ResetNoise{};
+    config.imitation.enabled = true;
+    config.imitation.motionPath = invertedPath;
+    config.imitation.referenceStateInit = false;
+    config.imitation.earlyTerminationPoseError = 0;
+
+    Env2D env;
+    env.initialize(config, 1);
+    const std::vector<Real> zeros(Env2D::actionDim(), Real(0));
+    while (!env.done()) env.step(zeros.data(), Env2D::actionDim());
+
+    // It ran to the time limit despite being low and inverted throughout.
+    CHECK(env.truncated());
+    CHECK(std::string(env.terminationReason()) != "pelvis_low");
+    CHECK(std::string(env.terminationReason()) != "chest_fallen");
+    CHECK(std::string(env.terminationReason()) != "head_low");
 }
 
 // ---------------------------------------------------------------- batch

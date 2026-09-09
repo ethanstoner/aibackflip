@@ -39,6 +39,7 @@ EnvConfig EnvConfig::fromJson(const Json& json) {
     const Json& push = json["disturbance"];
     config.pushProbabilityPerStep =
         push["probability_per_step"].real(config.pushProbabilityPerStep);
+    config.pushIntervalSteps = push["interval_steps"].integer(config.pushIntervalSteps);
     config.pushImpulseMin = push["impulse_min"].real(config.pushImpulseMin);
     config.pushImpulseMax = push["impulse_max"].real(config.pushImpulseMax);
 
@@ -108,6 +109,7 @@ Json EnvConfig::toJson() const {
 
     Json push = Json::object();
     push.set("probability_per_step", Json(double(pushProbabilityPerStep)));
+    push.set("interval_steps", Json(pushIntervalSteps));
     push.set("impulse_min", Json(double(pushImpulseMin)));
     push.set("impulse_max", Json(double(pushImpulseMax)));
     root.set("disturbance", std::move(push));
@@ -203,6 +205,7 @@ void Env2D::reset() {
     truncated_ = false;
     terminationReason_ = "";
     phase_ = startPhase;
+    pushCount_ = 0;
     motionTime_ = motionLoaded_ ? motion_.timeAt(startPhase) : Real(0);
 
     // One settle step so the first observation reports real contact state
@@ -317,11 +320,27 @@ void Env2D::step(const Real* actions, int count) {
 }
 
 void Env2D::maybeDisturb() {
-    if (config_.pushProbabilityPerStep <= Real(0)) return;
-    if (!rng_.chance(config_.pushProbabilityPerStep)) return;
+    bool shove = false;
+    Real direction = 0;
+
+    if (config_.pushIntervalSteps > 0) {
+        // Measurement schedule: exactly on the beat, alternating side, so a
+        // survival rate is attributable to the impulse magnitude and not to how
+        // many shoves happened to land.
+        if (episodeStep_ > 0 && episodeStep_ % config_.pushIntervalSteps == 0) {
+            shove = true;
+            direction = (pushCount_ % 2 == 0) ? Real(1) : Real(-1);
+        }
+    } else if (config_.pushProbabilityPerStep > Real(0) &&
+               rng_.chance(config_.pushProbabilityPerStep)) {
+        shove = true;
+        direction = rng_.chance(Real(0.5)) ? Real(1) : Real(-1);
+    }
+
+    if (!shove) return;
     const Real magnitude = rng_.uniform(config_.pushImpulseMin, config_.pushImpulseMax);
-    const Real direction = rng_.chance(Real(0.5)) ? Real(1) : Real(-1);
     push(Vec2(magnitude * direction, 0));
+    ++pushCount_;
 }
 
 void Env2D::push(const Vec2& impulse) {

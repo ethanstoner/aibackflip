@@ -7,6 +7,10 @@
 
 param(
     [string]$Config = "configs\ppo_stand.json",
+    # Environment-side config (disturbances, reset noise, imitation). Passed to
+    # aibf_env, not to the trainer - the simulator owns the task, Python owns
+    # the learning.
+    [string]$EnvConfig = "",
     [string]$Name = "",
     [int]$Port = 51234,
     [int]$Envs = 32,
@@ -24,10 +28,16 @@ $Python = Join-Path $Root "venv\Scripts\python.exe"
 if (-not (Test-Path $EnvExe)) { throw "missing $EnvExe - run scripts\build.ps1" }
 if (-not (Test-Path $Python)) { $Python = "python" }
 
+$serverArgs = @("--headless", "--quiet", "--port", "$Port", "--envs", "$Envs", "--seed", "$Seed")
+if ($EnvConfig -ne "") {
+    $envConfigPath = if (Test-Path $EnvConfig) { $EnvConfig } else { Join-Path $Root $EnvConfig }
+    if (-not (Test-Path $envConfigPath)) { throw "no such environment config: $EnvConfig" }
+    $serverArgs += @("--config", $envConfigPath)
+    Write-Host "environment config: $envConfigPath" -ForegroundColor Cyan
+}
+
 Write-Host "starting the environment server on port $Port with $Envs environments" -ForegroundColor Cyan
-$server = Start-Process -FilePath $EnvExe `
-    -ArgumentList "--headless", "--quiet", "--port", "$Port", "--envs", "$Envs", "--seed", "$Seed" `
-    -PassThru -WindowStyle Hidden
+$server = Start-Process -FilePath $EnvExe -ArgumentList $serverArgs -PassThru -WindowStyle Hidden
 Start-Sleep -Milliseconds 800
 
 if ($server.HasExited) { throw "the environment server exited immediately" }

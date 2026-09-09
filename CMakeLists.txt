@@ -100,6 +100,10 @@ target_link_libraries(aibf_engine PUBLIC aibf_humanoid glfw OpenGL::GL)
 add_executable(aibackflip cpp/main.cpp)
 target_link_libraries(aibackflip PRIVATE aibf_engine)
 
+# Reference motion editor.
+add_executable(aibf_animator cpp/animator.cpp)
+target_link_libraries(aibf_animator PRIVATE aibf_engine aibf_env_lib)
+
 # Reports measurements rather than assertions; links no rendering.
 add_executable(aibf_diag cpp/tools/diagnostics.cpp)
 target_link_libraries(aibf_diag PRIVATE aibf_humanoid)

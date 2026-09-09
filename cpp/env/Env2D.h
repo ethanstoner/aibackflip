@@ -83,7 +83,14 @@ struct EnvConfig {
     Real terminateChestUprightBelow = Real(0.2);
 
     // --- disturbances (M6) ---
+    //
+    // Two schedules. During training, a random one: shoves arrive at
+    // `pushProbabilityPerStep` so the policy cannot learn to brace on a timer.
+    // For measurement, a deterministic one: `pushIntervalSteps` fires exactly
+    // every N control steps with alternating direction, which is what turns
+    // "seems robust" into a survival curve against impulse magnitude.
     Real pushProbabilityPerStep = 0;
+    int pushIntervalSteps = 0;  // 0 uses the probability instead
     Real pushImpulseMin = 0;
     Real pushImpulseMax = 0;
 
@@ -167,6 +174,7 @@ private:
     bool truncated_ = false;
     const char* terminationReason_ = "";
     Real phase_ = 0;
+    int pushCount_ = 0;
 
     Motion2D motion_;
     bool motionLoaded_ = false;

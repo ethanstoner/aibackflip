@@ -251,6 +251,125 @@ void sectionJointAuthority() {
                 "  out of authority even at rest, and the ceiling or the gain has to rise.\n");
 }
 
+// How fast a target can move before the joint stops following it.
+//
+// This matters for imitation and nowhere else: standing needs a joint to hold
+// still, but a backflip asks the knee to sweep 2.5 radians in about 0.15 s,
+// which is a joint rate near 17 rad/s. A motor that lags badly at that rate
+// cannot track the reference no matter how good the policy is, and the symptom
+// would look like a training failure rather than a gain problem.
+//
+// Driven with a sinusoid, reported as amplitude ratio (1.0 = keeps up) and lag.
+void sectionBandwidth() {
+    std::printf("\n== motor bandwidth (pinned pelvis, sinusoidal target, 0.8 rad amplitude) ==\n");
+    std::printf("  %-10s %8s %10s %10s %10s\n", "joint", "Hz", "peak rate", "amplitude", "lag");
+
+    const Humanoid2DConfig config = Humanoid2DConfig::defaults();
+    const Real amplitude = Real(0.8);
+
+    for (const int joint : {kKneeL, kHipL, kShoulderL}) {
+        const JointConfig& jc = config.joints[static_cast<size_t>(joint)];
+        for (const Real hertz : {Real(0.5), Real(1.0), Real(2.0), Real(3.0), Real(4.0)}) {
+            World2D world;
+            world.addHalfSpace(HalfSpace{Vec2(0, 1), Real(-5), Real(1.0), Real(0)});
+            Humanoid2D figure;
+            figure.build(world, config);
+            figure.reset(world, config.links[kPelvis].restPosition);
+            figure.setMotorsEnabled(world, true);
+            figure.link(world, kPelvis).makeStatic();
+
+            // Centre the sweep inside the joint's own range so the limits are
+            // not what stops it.
+            const Real centre = (jc.lowerLimit + jc.upperLimit) * Real(0.5);
+            const Real swing =
+                std::min(amplitude, (jc.upperLimit - jc.lowerLimit) * Real(0.45));
+
+            Real peakActual = 0;
+            Real peakTarget = 0;
+            Real timeOfActualPeak = 0;
+            Real timeOfTargetPeak = 0;
+            const int total = stepsFor(Real(3));
+            const int settle = stepsFor(Real(1.5));
+
+            for (int i = 0; i < total; ++i) {
+                const Real t = Real(i) * kDt;
+                const Real target = centre + swing * std::sin(kTwoPi * hertz * t);
+                figure.setJointTarget(world, joint, target);
+                world.step(kDt);
+
+                if (i < settle) continue;
+                const Real actual = figure.jointAngle(world, joint) - centre;
+                if (actual > peakActual) {
+                    peakActual = actual;
+                    timeOfActualPeak = t;
+                }
+                const Real targetOffset = target - centre;
+                if (targetOffset > peakTarget) {
+                    peakTarget = targetOffset;
+                    timeOfTargetPeak = t;
+                }
+            }
+
+            const Real ratio = peakTarget > Real(0) ? peakActual / peakTarget : Real(0);
+            Real lag = timeOfActualPeak - timeOfTargetPeak;
+            const Real period = Real(1) / hertz;
+            while (lag < Real(0)) lag += period;
+            while (lag > period) lag -= period;
+
+            std::printf("  %-10s %8.1f %8.1f r/s %9.2f %8.0f ms%s\n", jc.name.c_str(),
+                        double(hertz), double(kTwoPi * hertz * swing), double(ratio),
+                        double(lag * Real(1000)), ratio < Real(0.7) ? "   <- losing it" : "");
+        }
+    }
+    std::printf("  amplitude below ~0.7 means the joint cannot reach where it is being sent,\n"
+                "  which for an imitation reference shows up as an untrackable motion.\n");
+
+    // The default gains use kd = kp/10 everywhere, which is heavily overdamped.
+    // For a spring-damper the tracking corner frequency is kp/kd, so that ratio
+    // *is* the bandwidth in rad/s - and it predicts the numbers above. Worth
+    // confirming by sweeping it rather than trusting the algebra.
+    std::printf("\n== knee bandwidth against the damping ratio kd = kp/N ==\n");
+    std::printf("  %-8s %10s %10s %10s %10s\n", "kp/kd", "@1 Hz", "@2 Hz", "@3 Hz", "@4 Hz");
+
+    for (const Real divisor : {Real(10), Real(20), Real(30), Real(50), Real(80)}) {
+        std::printf("  %-8.0f", double(divisor));
+        for (const Real hertz : {Real(1.0), Real(2.0), Real(3.0), Real(4.0)}) {
+            Humanoid2DConfig tuned = config;
+            for (JointConfig& joint : tuned.joints) joint.damping = joint.stiffness / divisor;
+
+            World2D world;
+            world.addHalfSpace(HalfSpace{Vec2(0, 1), Real(-5), Real(1.0), Real(0)});
+            Humanoid2D figure;
+            figure.build(world, tuned);
+            figure.reset(world, tuned.links[kPelvis].restPosition);
+            figure.setMotorsEnabled(world, true);
+            figure.link(world, kPelvis).makeStatic();
+
+            const JointConfig& jc = tuned.joints[kKneeL];
+            const Real centre = (jc.lowerLimit + jc.upperLimit) * Real(0.5);
+            const Real swing = std::min(amplitude, (jc.upperLimit - jc.lowerLimit) * Real(0.45));
+
+            Real peakActual = 0;
+            const int total = stepsFor(Real(3));
+            const int settle = stepsFor(Real(1.5));
+            for (int i = 0; i < total; ++i) {
+                const Real t = Real(i) * kDt;
+                figure.setJointTarget(world, kKneeL,
+                                      centre + swing * std::sin(kTwoPi * hertz * t));
+                world.step(kDt);
+                if (i >= settle) {
+                    peakActual = std::max(peakActual, figure.jointAngle(world, kKneeL) - centre);
+                }
+            }
+            const bool unstable = world.stats().unstable || world.stats().velocityClampEvents > 0;
+            std::printf(" %9.2f%s", double(peakActual / swing), unstable ? "!" : " ");
+        }
+        std::printf("\n");
+    }
+    std::printf("  a trailing ! means the solver clamped a velocity or went unstable.\n"
+                "  A backflip tuck sweeps the knee at roughly 17 rad/s, near 3 Hz here.\n");
+}
+
 void sectionThroughput() {
     std::printf("\n== headless throughput ==\n");
 
@@ -303,6 +422,7 @@ int main(int argc, char** argv) {
     if (wanted("energy")) sectionEnergy();
     if (wanted("resting")) sectionResting();
     if (wanted("authority")) sectionJointAuthority();
+    if (wanted("bandwidth")) sectionBandwidth();
     if (wanted("perturbation")) sectionPerturbation();
     if (wanted("throughput")) sectionThroughput();
     std::printf("\n");

@@ -19,6 +19,35 @@
     "angular_velocity": 0.0
   },
 
+  // Damping lowered from the standing default of kd = kp/10 to kd = kp/50.
+  //
+  // For a spring-damper the tracking corner frequency is kp/kd, so that ratio
+  // is the bandwidth in rad/s. Measured (aibf_diag bandwidth): at kp/10 the
+  // knee reaches only 47% of a commanded 3 Hz swing; at kp/50 it reaches 97%,
+  // with no instability at any setting tried. A backflip tuck sweeps the knee
+  // at roughly 17 rad/s, so the standing gains simply cannot follow it - the
+  // reference would be untrackable no matter how long training ran, and the
+  // symptom would look like a learning failure rather than a gain problem.
+  //
+  // The standing and push-recovery policies keep the original damping; nothing
+  // here changes those.
+  "humanoid": {
+    "joints": [
+      {"name": "waist",      "kd": 80},
+      {"name": "neck",       "kd": 8},
+      {"name": "shoulder_l", "kd": 16},
+      {"name": "elbow_l",    "kd": 10},
+      {"name": "shoulder_r", "kd": 16},
+      {"name": "elbow_r",    "kd": 10},
+      {"name": "hip_l",      "kd": 80},
+      {"name": "knee_l",     "kd": 60},
+      {"name": "ankle_l",    "kd": 30},
+      {"name": "hip_r",      "kd": 80},
+      {"name": "knee_r",     "kd": 60},
+      {"name": "ankle_r",    "kd": 30}
+    ]
+  },
+
   "imitation": {
     "motion": "motions/jump.json",
     "enabled": true,

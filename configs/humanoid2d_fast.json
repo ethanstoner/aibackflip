@@ -1,0 +1,21 @@
+// Humanoid with imitation damping (kd = kp/50 instead of the standing kp/10).
+//
+// Standalone so the animator's physics preview runs with the same gains the
+// imitation environments use. Previewing with the standing gains would show a
+// motion failing for a reason that will not exist during training.
+{
+  "joints": [
+    {"name": "waist",      "kd": 80},
+    {"name": "neck",       "kd": 8},
+    {"name": "shoulder_l", "kd": 16},
+    {"name": "elbow_l",    "kd": 10},
+    {"name": "shoulder_r", "kd": 16},
+    {"name": "elbow_r",    "kd": 10},
+    {"name": "hip_l",      "kd": 80},
+    {"name": "knee_l",     "kd": 60},
+    {"name": "ankle_l",    "kd": 30},
+    {"name": "hip_r",      "kd": 80},
+    {"name": "knee_r",     "kd": 60},
+    {"name": "ankle_r",    "kd": 30}
+  ]
+}

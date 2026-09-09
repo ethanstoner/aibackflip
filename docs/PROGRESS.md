@@ -552,3 +552,125 @@ rather than merely close to the right value, so the failure mode cannot creep ba
 ### Next
 
 M5 — PPO on top of this, and finding out whether the humanoid learns to stand.
+
+---
+
+## M5 — PPO, and the humanoid learns to stand
+
+**Status:** done (2026-09-08). **The exit criterion was met.**
+
+### Implemented
+
+- **`python/rl/rollout.py`** — fixed (steps x environments) storage and GAE.
+- **`python/rl/ppo.py`** — clipped surrogate, value loss, entropy bonus, gradient clipping,
+  advantage normalisation, and a target-KL early stop using Schulman's low-variance estimator.
+- **`python/train.py`** — the training loop, TensorBoard logging, checkpointing.
+- **`python/test.py`** — playback of a checkpoint with no backpropagation and the normaliser
+  frozen.
+- **`scripts/train.ps1`**, **`scripts/evaluate.ps1`**; `aibf_env --capture` gained a frame strip.
+
+### The result
+
+`configs/ppo_stand.json`, 32 environments, 6.0M environment steps in **13.7 minutes** at
+~7 800 steps/s end to end.
+
+Evaluated afterwards with `test.py` — deterministic actions, frozen normaliser, 40 episodes:
+
+| | |
+|---|---|
+| Episodes reaching the 1000-step time limit | **40 / 40** |
+| Return | mean +4418.19, min +4412.98, max +4420.70 |
+| Episode length | 1000.0 (16.7 s), min 1000, max 1000 |
+| Pelvis height while running | 0.989 of rest |
+| Foot contacts in every captured frame | 2 |
+
+A random policy survives 60 steps. This one survives all 1000, every time, with a return
+spread of 8 points out of 4418 — **0.2%** — from randomised initial states. Converging to the
+same outcome from different starts is what makes this balance rather than a memorised pose.
+
+Reward components, first update against the mean of the last twenty:
+
+| term | start | final | |
+|---|---|---|---|
+| `com_over_support` | 0.235 | **0.990** | +0.754 |
+| `foot_contact` | 0.520 | **0.999** | +0.479 |
+| `chest_upright` | 0.896 | 0.995 | +0.099 |
+| `head_upright` | 0.898 | 0.996 | +0.097 |
+| `head_height` | 0.939 | 0.991 | +0.052 |
+| `pelvis_height` | 0.948 | 0.990 | +0.042 |
+| `angular_drift_cost` | 2.649 | 0.205 | −2.444 |
+| `vertical_drift_cost` | 0.535 | 0.032 | −0.503 |
+| `horizontal_drift_cost` | 0.558 | 0.061 | −0.496 |
+| `torque_cost` | 0.441 | 0.138 | −0.303 |
+| `action_cost` | 0.308 | 0.268 | −0.040 |
+| `joint_limit_cost` | 0.000 | 0.000 | — |
+
+Every single component moved the right way. That matters more than the scalar return: a policy
+that had found an exploit would show one term saturating while the others flatlined, and the
+per-component logging exists specifically to make that visible. It is not what happened.
+`torque_cost` **falling** to 0.138 is the clearest sign — the final policy stands using less
+effort than the flailing one it started from, which is what an actual balance strategy looks
+like rather than a stiff brace.
+
+Visual verification (`aibf_env --capture`, six frames across one episode, inspected): a
+two-footed staggered stance, torso upright, head level, centre of mass projecting between the
+feet. Frames 700 control steps apart report identical pelvis and head heights to three
+decimals, so it settles onto a fixed point and holds it.
+
+### What it is not
+
+Worth saying plainly, because the numbers alone would oversell it.
+
+- **The stance is a staggered brace with one arm held out**, not a natural feet-together idle.
+  Both feet are down and it is stable, but a person standing still does not look like this. The
+  reward asks for height, uprightness and the centre of mass over the support polygon, and this
+  satisfies all three; nothing asks for a symmetric or natural-looking pose.
+- **It has not been pushed.** Standing undisturbed from mild reset noise is a much weaker claim
+  than recovering from a shove, and that is exactly what M6 is for. The M1 measurement stands as
+  the bar to beat: a pose-holding controller survives 15 N·s and falls to 40.
+- **Explained variance ends at −0.67**, which looks alarming. The reading is that it becomes
+  meaningless once the task is solved: within a single 2048-sample rollout every episode now
+  returns within 0.2% of every other, so the variance the metric divides by collapses to noise.
+  This is supported by the trace — EV was a healthy +0.87 early, when returns genuinely varied,
+  and degraded as the policy converged. That is an inference from the logs rather than something
+  isolated with a controlled experiment, and it is the one number in this milestone not
+  independently confirmed.
+
+### Tested
+
+**18 Python cases for PPO and GAE**, on top of the existing suites (279 total across both
+languages). The GAE expectations are hand-computed from the definition rather than recomputed
+with the loop under test, which would prove nothing.
+
+The boundary handling gets four dedicated tests because it is subtly wrong in a way that still
+trains: termination zeroes the bootstrap, truncation bootstraps from the observation the episode
+ended on, the recursion breaks at *every* episode boundary so a later episode's reward cannot
+leak backwards, and lambda 0 / lambda 1 reduce to the one-step TD error and the Monte Carlo
+return respectively.
+
+One test earns its keep more than the rest: `test_the_first_minibatch_starts_at_a_ratio_of_one`.
+If `act` and `evaluate_actions` ever disagree about a log-probability, the PPO ratio starts away
+from 1 and every update is wrong — while still training, just badly.
+
+`test_ppo_can_solve_a_trivial_bandit` closes the loop end to end: a one-step problem where
+reward is −(a − target)², which converges only if every sign in the objective is right.
+
+### Problem found by a test
+
+`ppo_clipped_objective` was asserted against hand-computed values, and the hand computation was
+wrong, not the code. For a *negative* advantage with ratio 0.5 the objective is −0.8, not −0.5:
+clipping bites when a bad action is made less likely, and leaves the penalty uncapped when it is
+made more likely. The asymmetry is the entire point of the objective and is easy to state
+backwards, so the corrected expectation is now spelled out in the test.
+
+### Known issues
+
+- The best checkpoint is saved on every improvement in the running mean return, which early in a
+  run is most updates. Harmless, and it costs a measurable slice of the 7 800 steps/s.
+- `--render` while training costs throughput, since serving and drawing share a thread.
+
+### Next
+
+M6 — robustness: random shoves during training (`configs/env2d_robust.json`), wider reset noise,
+and an interactive mode for pushing the figure and throwing things at it. The bar is recovering
+from disturbances it never saw individually.

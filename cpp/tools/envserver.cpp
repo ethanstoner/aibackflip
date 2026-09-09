@@ -40,6 +40,8 @@ struct Options {
     // actually doing without a person watching.
     std::string capturePath;
     int captureAfterSteps = 120;
+    int captureCount = 1;
+    int captureIntervalSteps = 60;
 };
 
 void printUsage() {
@@ -55,10 +57,21 @@ void printUsage() {
         "  --headless          no window at all (default)\n"
         "  --render            open a window showing one environment while serving\n"
         "  --render-env <i>    which environment to draw (default 0)\n"
+        "  --capture <path>    screenshot the rendered environment and exit\n"
+        "  --capture-after <n> control steps to wait before the first capture\n"
+        "  --capture-count <n> number of captures (default 1)\n"
+        "  --capture-every <n> control steps between captures (default 60)\n"
         "  --quiet             suppress the periodic status line\n"
         "  --verbose           log connections and resets\n"
         "  --exit-on-bye       shut down when the client disconnects (default: keep\n"
-        "                      serving, so a restarted trainer can reconnect)\n");
+        "                      serving, so a restarted trainer can reconnect)\n"
+        "\n"
+        "render-mode controls\n"
+        "  x / z    shove the pelvis right / left (hold shift for a hard shove)\n"
+        "  b        throw a ball at it\n"
+        "  mouse    left-drag a limb\n"
+        "  t c j v  trails, contacts, joint targets, velocities\n"
+        "  wheel    zoom\n");
 }
 
 bool parseOptions(int argc, char** argv, Options& out, bool& showHelp) {
@@ -74,6 +87,8 @@ bool parseOptions(int argc, char** argv, Options& out, bool& showHelp) {
         else if (arg == "--verbose") { out.server.verbose = true; }
         else if (arg == "--exit-on-bye") { out.server.exitOnBye = true; }
         else if (arg == "--capture-after") { nextInt(out.captureAfterSteps); }
+        else if (arg == "--capture-count") { nextInt(out.captureCount); }
+        else if (arg == "--capture-every") { nextInt(out.captureIntervalSteps); }
         else if (arg == "--capture" && i + 1 < argc) {
             out.capturePath = argv[++i];
             out.render = true;
@@ -169,15 +184,25 @@ int runRendered(net::EnvServer& server, const Options& options) {
                           : 0;
     Trail comTrail(240);
     int frame = 0;
+    int capturesTaken = 0;
+    int nextCaptureStep = options.captureAfterSteps;
+
+    // Props thrown at the figure. Created once and recycled, so a long session
+    // does not accumulate bodies in the world.
+    std::vector<int32_t> props;
+    size_t nextProp = 0;
 
     while (window.isOpen() && server.isRunning() && !server.shouldStop()) {
         window.pollEvents();
-        if (window.input().keyPressed[GLFW_KEY_ESCAPE]) window.requestClose();
-        if (window.input().keyPressed[GLFW_KEY_T]) draw.trail = !draw.trail;
-        if (window.input().keyPressed[GLFW_KEY_C]) draw.contacts = !draw.contacts;
-        if (window.input().scroll != Real(0)) {
-            camera.halfHeight = clamp(camera.halfHeight * std::pow(Real(0.9), window.input().scroll),
-                                      Real(0.3), Real(12));
+        const Input& input = window.input();
+        if (input.keyPressed[GLFW_KEY_ESCAPE]) window.requestClose();
+        if (input.keyPressed[GLFW_KEY_T]) draw.trail = !draw.trail;
+        if (input.keyPressed[GLFW_KEY_C]) draw.contacts = !draw.contacts;
+        if (input.keyPressed[GLFW_KEY_J]) draw.jointTargets = !draw.jointTargets;
+        if (input.keyPressed[GLFW_KEY_V]) draw.velocities = !draw.velocities;
+        if (input.scroll != Real(0)) {
+            camera.halfHeight =
+                clamp(camera.halfHeight * std::pow(Real(0.9), input.scroll), Real(0.3), Real(12));
         }
         camera.aspect = window.aspect();
 
@@ -186,6 +211,48 @@ int runRendered(net::EnvServer& server, const Options& options) {
         server.poll(8, 256);
 
         Env2D& env = server.batch().env(index);
+
+        // ---- disturbances, for watching a policy recover ----
+        //
+        // These act on the live environment the trainer is stepping, so what is
+        // being poked is the same simulation being learned from.
+        const Vec2 worldMouse =
+            camera.screenToWorld(input.mouseScreen, window.width(), window.height());
+        if (input.mousePressed[GLFW_MOUSE_BUTTON_LEFT]) {
+            const int32_t picked = env.world().pickBody(worldMouse, Real(0.12));
+            if (picked >= 0) env.world().grab(picked, worldMouse);
+        }
+        if (input.mouseDown[GLFW_MOUSE_BUTTON_LEFT]) env.world().mouse().target = worldMouse;
+        if (input.mouseReleased[GLFW_MOUSE_BUTTON_LEFT]) env.world().releaseGrab();
+
+        if (input.keyPressed[GLFW_KEY_X] || input.keyPressed[GLFW_KEY_Z]) {
+            const Real direction = input.keyPressed[GLFW_KEY_X] ? Real(1) : Real(-1);
+            const Real magnitude = input.shift ? Real(120) : Real(45);
+            env.push(Vec2(direction * magnitude, 0));
+            std::printf("pushed env %d with %.0f N s\n", index, double(direction * magnitude));
+            std::fflush(stdout);
+        }
+
+        if (input.keyPressed[GLFW_KEY_B]) {
+            const Vec2 from = env.figure().centerOfMass(env.world()) + Vec2(Real(-3), Real(0.8));
+            const Vec2 velocity(Real(9), Real(0.5));
+            if (props.size() < 6) {
+                RigidBody2D ball;
+                ball.setCapsuleWithMass(Real(0.12), 0, Real(4));
+                ball.friction = Real(0.6);
+                ball.restitution = Real(0.35);
+                ball.collisionGroup = 0;  // props do collide with the figure
+                ball.position = from;
+                ball.velocity = velocity;
+                props.push_back(env.world().addBody(ball));
+            } else {
+                RigidBody2D& ball = env.world().body(props[nextProp % props.size()]);
+                ball.position = from;
+                ball.velocity = velocity;
+                ball.angularVelocity = 0;
+                ++nextProp;
+            }
+        }
         const Vec2 com = env.figure().centerOfMass(env.world());
         comTrail.push(com);
         camera.center.x += (com.x - camera.center.x) * Real(0.08);
@@ -193,21 +260,40 @@ int runRendered(net::EnvServer& server, const Options& options) {
         renderer.beginFrame(camera, palette::background);
         renderer.groundAndGrid(camera, 0, Real(0.5));
         if (draw.trail) drawTrail(renderer, comTrail, palette::com);
+        for (const int32_t prop : props) {
+            const RigidBody2D& body = env.world().body(prop);
+            renderer.capsule(body.position, body.angle, body.radius, body.halfLength,
+                             palette::accent);
+        }
         drawHumanoid(renderer, env.world(), env.figure(), camera, draw);
         drawWorld(renderer, env.world(), camera, draw);
+        drawMouseSpring(renderer, env.world(), camera);
         renderer.endFrame();
 
-        if (capturing && server.stats().step >= static_cast<uint32_t>(options.captureAfterSteps)) {
-            if (!window.saveScreenshot(options.capturePath)) {
-                std::fprintf(stderr, "failed to write %s\n", options.capturePath.c_str());
+        if (capturing && server.stats().step >= static_cast<uint32_t>(nextCaptureStep)) {
+            std::string path = options.capturePath;
+            if (options.captureCount > 1) {
+                const size_t dot = path.rfind('.');
+                char suffix[16];
+                std::snprintf(suffix, sizeof(suffix), "_%02d", capturesTaken);
+                path = (dot == std::string::npos) ? path + suffix
+                                                  : path.substr(0, dot) + suffix + path.substr(dot);
+            }
+            if (!window.saveScreenshot(path)) {
+                std::fprintf(stderr, "failed to write %s\n", path.c_str());
                 return 1;
             }
-            std::printf("captured %s after %u control steps (env %d, pelvis %.3f m, "
-                        "episode step %d)\n",
-                        options.capturePath.c_str(), server.stats().step, index,
+            std::printf("captured %s at step %u (env %d, pelvis %.3f m, head %.3f m, "
+                        "episode step %d, contacts %d)\n",
+                        path.c_str(), server.stats().step, index,
                         double(env.figure().link(env.world(), kPelvis).position.y),
-                        env.episodeStep());
-            return 0;
+                        double(env.figure().headHeight(env.world())), env.episodeStep(),
+                        (env.figure().footContact(env.world(), true) ? 1 : 0) +
+                            (env.figure().footContact(env.world(), false) ? 1 : 0));
+            std::fflush(stdout);
+            ++capturesTaken;
+            nextCaptureStep += options.captureIntervalSteps;
+            if (capturesTaken >= options.captureCount) return 0;
         }
 
         window.present();

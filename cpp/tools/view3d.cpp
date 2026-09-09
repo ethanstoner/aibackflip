@@ -1,13 +1,27 @@
 // Plays a 3D reference motion, either kinematically or through the motors.
 //
-// Two modes, and the difference between them is the whole point:
+// Two modes:
 //
 //   --kinematic  the figure is placed at the reference pose every frame. This
 //                shows what was authored, with no physics at all.
 //   --preview    the motors chase the reference and physics decides the rest,
-//                with no learning anywhere. If the PD preview cannot roughly
-//                follow a clip, no policy is going to either, and finding that
-//                out costs seconds instead of an hour of training.
+//                with no learning anywhere.
+//
+// **What the preview does and does not tell you.** It answers one question: can
+// the motors follow these joint trajectories at these gains. It cannot answer
+// whether the motion balances, because it is open loop at the root. The pelvis
+// is a free body; nothing in the clip controls its orientation, and holding
+// fixed joint angles on an inverted pendulum means any lean grows.
+//
+// That distinction was learned the hard way. The squat preview reaches 0.40 m
+// where the clip asks for 0.79, which reads as a total failure to track. The
+// per-joint errors say otherwise: every joint is within 0.12 rad, most within
+// 0.04. The figure holds the right *shape* the whole way down and topples over
+// its feet while doing it. The clip is fine and the gains are fine; open-loop
+// control simply cannot balance, which is exactly the part a policy supplies.
+//
+// So a preview that tracks the joints and falls over is a pass, not a failure.
+// A preview whose joint errors are large is a real warning about the gains.
 //
 //   aibf_view3d motions/backflip3d.json --preview --capture out/flip.png
 #include <cmath>
@@ -22,6 +36,7 @@
 #include "engine/Window.h"
 #include "humanoid/Humanoid3D.h"
 #include "env/Env3D.h"
+#include "humanoid/RewardTerms3D.h"
 #include "motion/Motion3D.h"
 
 using namespace aibf;
@@ -166,7 +181,14 @@ int main(int argc, char** argv) {
         captureCount > 1 ? motion.duration() / Real(captureCount - 1) : motion.duration();
     Real nextCapture = 0;
 
-    Real peakRoot = 0, lowestPoint = Real(1e9);
+    // Both extremes, and the reference's own extremes alongside them. Reporting
+    // only the peak was useless for a squat, whose peak is simply standing: it
+    // said 0.999 m for a preview that never crouched at all.
+    Real peakRoot = 0, minRoot = Real(1e9), lowestPoint = Real(1e9);
+    Real refPeak = 0, refMin = Real(1e9);
+    // Worst tracking error per joint over the whole clip. A summary that only
+    // reports the root says a limb collapsed but not which one.
+    std::vector<Real> worstJointError(kJointCount, Real(0));
 
     while (window.isOpen()) {
         window.pollEvents();
@@ -189,6 +211,18 @@ int main(int argc, char** argv) {
 
         const RigidBody3D& pelvis = figure.link(world, kPelvis);
         peakRoot = std::max(peakRoot, pelvis.position.y);
+        minRoot = std::min(minRoot, pelvis.position.y);
+        refPeak = std::max(refPeak, pose.rootPosition.y);
+        refMin = std::min(refMin, pose.rootPosition.y);
+        if (!kinematic) {
+            for (int j = 0; j < kJointCount; ++j) {
+                const Quat achieved = jointRotation(world, figure, j);
+                const Real error = angleOf(
+                    achieved * conjugate(pose.jointRotations[static_cast<size_t>(j)]));
+                worstJointError[static_cast<size_t>(j)] =
+                    std::max(worstJointError[static_cast<size_t>(j)], error);
+            }
+        }
         lowestPoint = std::min(lowestPoint, figure.lowestPoint(world));
 
         camera.target = camera.target + (Vec3(pelvis.position.x, Real(0.9), pelvis.position.z) -
@@ -226,13 +260,30 @@ int main(int argc, char** argv) {
         time += controlDt * speed;
         ++frame;
         if (time > motion.duration()) {
+            // Runs the whole clip even when capturing fewer frames than it
+            // lasts. Breaking at the last capture meant the summary below
+            // described whatever fraction of the motion had happened by then,
+            // which for a two-frame capture was a single instant.
             if (capturing) break;
             time = 0;
         }
     }
 
-    std::printf("%s: %s, peak pelvis %.3f m, lowest point %.3f m\n", motion.name.c_str(),
-                kinematic ? "kinematic" : "PD preview", double(peakRoot), double(lowestPoint));
+    std::printf("%s: %s\n", motion.name.c_str(), kinematic ? "kinematic" : "PD preview");
+    std::printf("  pelvis    %.3f to %.3f m  (range %.3f)\n", double(minRoot), double(peakRoot),
+                double(peakRoot - minRoot));
+    std::printf("  reference %.3f to %.3f m  (range %.3f)\n", double(refMin), double(refPeak),
+                double(refPeak - refMin));
+    std::printf("  lowest point %.3f m\n", double(lowestPoint));
+    if (!kinematic) {
+        // Which joint failed, not merely that something did. A root-only
+        // summary says the figure went down and leaves the cause to guesswork.
+        std::printf("  worst joint tracking error, radians:\n");
+        for (int j = 0; j < kJointCount; ++j) {
+            std::printf("    %-12s %.3f\n", config.joints[static_cast<size_t>(j)].name.c_str(),
+                        double(worstJointError[static_cast<size_t>(j)]));
+        }
+    }
     renderer.shutdown();
     return 0;
 }

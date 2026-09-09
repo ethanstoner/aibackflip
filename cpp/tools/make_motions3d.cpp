@@ -306,6 +306,11 @@ void report(const Rig& rig, const Motion3D& motion) {
     // Report the extremes the clip asks for, so an obviously impossible motion
     // is visible here rather than after an hour of training.
     Real lowest = Real(1e9), highest = -Real(1e9), turns = 0;
+    // How far the centre of mass sits from the midpoint of the feet,
+    // horizontally. A standing figure is near zero; anything much past a foot
+    // length is a pose that falls over rather than holds.
+    Real worstBalance = 0, worstBalanceTime = 0;
+
     for (Real t = 0; t <= motion.duration(); t += Real(0.02)) {
         const MotionPose3D pose = motion.sample(t);
         std::vector<Vec3> positions(kLinkCount);
@@ -320,12 +325,45 @@ void report(const Rig& rig, const Motion3D& motion) {
         }
         highest = std::max(highest, pose.rootPosition.y);
         turns = pose.rootTurns;
+
+        // Only meaningful while the figure is still standing on its feet, so it
+        // is skipped once the clip has turned away from upright.
+        if (std::abs(pose.rootTurns) < Real(0.05)) {
+            Vec3 com(0, 0, 0);
+            Real mass = 0;
+            for (int i = 0; i < kLinkCount; ++i) {
+                const Real m = rig.config.links[static_cast<size_t>(i)].mass;
+                com += positions[i] * m;
+                mass += m;
+            }
+            com = com / mass;
+            const Vec3 feet = (positions[kFootL] + positions[kFootR]) * Real(0.5);
+            const Real offset = std::sqrt((com.x - feet.x) * (com.x - feet.x) +
+                                          (com.z - feet.z) * (com.z - feet.z));
+            if (offset > worstBalance) {
+                worstBalance = offset;
+                worstBalanceTime = t;
+            }
+        }
     }
+
     std::printf("               root peak %.2f m, lowest point %.3f m, %.2f turns\n",
                 double(highest), double(lowest), double(turns));
     if (lowest < Real(-0.05)) {
         std::printf("               WARNING: the clip passes %.3f m through the floor\n",
                     double(lowest));
+    }
+    std::printf("               worst COM offset from the feet %.3f m at t=%.2f\n",
+                double(worstBalance), double(worstBalanceTime));
+    if (worstBalance > Real(0.12)) {
+        // Solving the root *height* by forward kinematics says nothing about
+        // whether the pose balances, and the first squat clip written here was
+        // out by a quarter of a metre. Its PD preview did not squat at all: it
+        // toppled slowly forward while the height trace still looked like a
+        // plausible descent, which is exactly the kind of failure that survives
+        // a summary and dies under a picture.
+        std::printf("               WARNING: this pose does not balance; the figure will "
+                    "topple\n");
     }
 }
 

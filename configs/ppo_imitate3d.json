@@ -1,0 +1,60 @@
+{
+  "name": "imitate3d",
+  "host": "127.0.0.1",
+  "port": 51260,
+  "num_envs": 32,
+  "seed": 1,
+
+  "total_env_steps": 20000000,
+  "rollout_steps": 64,
+
+  "hidden_sizes": [512, 256],
+  "log_std_init": -0.5,
+
+  "normalize_observations": true,
+  "normalize_rewards": true,
+
+  "ppo": {
+    "learning_rate": 0.0003,
+    "gamma": 0.99,
+    "gae_lambda": 0.95,
+    "clip_range": 0.2,
+    "clip_range_value": null,
+    "entropy_coef": 0.0,
+    "value_coef": 0.5,
+    "max_grad_norm": 0.5,
+    "epochs": 5,
+    "minibatch_size": 1024,
+    "target_kl": 0.02,
+    "normalize_advantages": true,
+    "anneal_learning_rate": true
+  },
+
+  "reward_weights": {
+    "alive": 0.3,
+
+    "pose_match": 0.65,
+    "joint_velocity_match": 0.05,
+    "end_effector_match": 0.15,
+    "root_match": 0.5,
+    "com_match": 0.1,
+
+    "action_cost": -0.02,
+    "torque_cost": -0.02,
+    "joint_limit_cost": -0.5,
+
+    "pelvis_height": 0.0,
+    "head_height": 0.0,
+    "chest_upright": 0.0,
+    "head_upright": 0.0,
+    "com_over_support": 0.0,
+    "foot_contact": 0.0,
+    "horizontal_drift_cost": 0.0,
+    "vertical_drift_cost": 0.0,
+    "angular_drift_cost": 0.0
+  },
+
+  "log_dir": "runs",
+  "checkpoint_dir": "checkpoints",
+  "save_every_updates": 50
+}

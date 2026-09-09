@@ -42,10 +42,28 @@
     "early_termination_root_error": 0.7,
     "end_episode_at_motion_end": true,
 
+    // Falloff rates measured against what the figure actually does, not carried
+    // over from 2D.
+    //
+    // The 2D rates left three of the five terms reading 0.001, 0.002 and 0.007
+    // on a policy that completed the clip 32 times out of 32. Inverting
+    // exp(-k*E) says why: 0.536 rad of joint error, 7.2 rad/s of joint velocity
+    // error and 0.288 m of end-effector error, all far enough out that the
+    // exponential is flat there.
+    //
+    // A flat term is not a weak signal, it is no signal, and this time it was
+    // flat *at initialization* rather than at convergence. A term dead at
+    // convergence has at least done its job on the way; a term dead at the start
+    // can never produce the gradient that would rescue it, so the policy
+    // optimised root and centre of mass and ignored pose entirely.
+    //
+    // These put each term near 0.4 where an untrained policy starts and near
+    // 0.87 where a good one should end up, which is the range where the
+    // exponential actually discriminates.
     "scales": {
-      "pose": 2.0,
-      "joint_velocity": 0.01,
-      "end_effector": 15.0,
+      "pose": 0.27,
+      "joint_velocity": 0.0015,
+      "end_effector": 2.8,
       "root": 20.0,
       "com": 10.0,
       "root_angle_weight": 0.5

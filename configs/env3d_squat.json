@@ -1,4 +1,5 @@
-// The cartwheel, the motion with no 2D counterpart at all.
+// A squat: no rotation, no flight. The sanity case, because if imitation
+// cannot learn this one, nothing acrobatic is worth attempting.
 //
 // Damping lowered from the standing default of kd = kp/10 to kd = kp/50.
 // Tracking bandwidth is kp/kd, and the 2D milestone measured a knee reaching
@@ -7,7 +8,7 @@
 // gains never leaves the ground at all, peaking at 1.02 m against the 1.62 m
 // the reference asks for.
 {
-  "max_episode_steps": 190,
+  "max_episode_steps": 300,
 
   "reset_noise": {
     "root_tilt": 0.05,
@@ -35,7 +36,7 @@
   },
 
   "imitation": {
-    "motion": "motions/cartwheel.json",
+    "motion": "motions/squat3d.json",
     "enabled": true,
     "reference_state_init": true,
     "early_termination_pose_error": 1.1,

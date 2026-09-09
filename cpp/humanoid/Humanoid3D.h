@@ -45,6 +45,34 @@ public:
     // Sets every motor target back to the rest pose.
     void relaxToRestPose(World3D& world) const;
 
+    // Where every link ends up given a root transform and one rotation per
+    // joint. World independent in the sense that matters: it reads only the
+    // joint constants, which were derived from the rest pose and never change,
+    // so a reference motion can be expanded without touching the live figure.
+    //
+    // `outPositions` and `outOrientations` each take kLinkCount entries.
+    void forwardKinematics(const World3D& world, const Vec3& rootPosition,
+                           const Quat& rootOrientation, const Quat* jointRotations,
+                           Vec3* outPositions, Quat* outOrientations) const;
+
+    // Velocity-level forward kinematics, for Reference State Initialization.
+    // Starting an episode mid-motion with the right pose and zero velocity is
+    // not the same state at all: a figure at the apex of a flip is defined as
+    // much by how fast it is turning as by its shape.
+    void forwardKinematicsVelocity(const World3D& world, const Vec3& rootVelocity,
+                                   const Vec3& rootAngularVelocity, const Vec3* jointRates,
+                                   const Vec3* positions, const Quat* orientations,
+                                   Vec3* outVelocities, Vec3* outAngularVelocities) const;
+
+    // Places the figure at a fully expanded reference pose, velocities and all.
+    void applyPose(World3D& world, const Vec3* positions, const Quat* orientations,
+                   const Vec3* velocities, const Vec3* angularVelocities) const;
+
+    // Root height that puts the figure's lowest point exactly on the ground for
+    // the given pose. Used so an authored crouch actually reaches the floor.
+    Real groundedRootHeight(const World3D& world, const Quat& rootOrientation,
+                            const Quat* jointRotations) const;
+
     // Places the figure at a pose without touching velocities.
     void setPose(World3D& world, const Vec3& rootPosition, const Quat& rootOrientation) const;
 

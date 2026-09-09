@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <vector>
 
 namespace aibf {
 
@@ -161,6 +163,122 @@ void Humanoid3D::setPose(World3D& world, const Vec3& rootPosition,
         body.orientation = rootOrientation * lc.restOrientation;
         body.refreshInertiaWorld();
     }
+}
+
+
+namespace {
+
+// Anchor and reference constants for one joint, whichever kind it is. These were
+// derived from the rest pose at build time and never change, which is what lets
+// forward kinematics run without touching the live figure's state.
+struct JointFrame {
+    Vec3 localAnchorParent;
+    Vec3 localAnchorChild;
+    Quat referenceRotation;
+};
+
+JointFrame frameOf(const World3D& world, const Humanoid3D& figure, int jointId) {
+    JointFrame frame;
+    const int32_t ball = figure.ballIndex(jointId);
+    if (ball >= 0) {
+        const BallJoint3D& joint = world.ballJoint(ball);
+        frame.localAnchorParent = joint.localAnchorA;
+        frame.localAnchorChild = joint.localAnchorB;
+        frame.referenceRotation = joint.referenceRotation;
+        return frame;
+    }
+    const HingeJoint3D& joint = world.hingeJoint(figure.hingeIndex(jointId));
+    frame.localAnchorParent = joint.localAnchorA;
+    frame.localAnchorChild = joint.localAnchorB;
+    frame.referenceRotation = joint.referenceRotation;
+    return frame;
+}
+
+}  // namespace
+
+void Humanoid3D::forwardKinematics(const World3D& world, const Vec3& rootPosition,
+                                   const Quat& rootOrientation, const Quat* jointRotations,
+                                   Vec3* outPositions, Quat* outOrientations) const {
+    outPositions[kPelvis] = rootPosition;
+    outOrientations[kPelvis] = rootOrientation;
+
+    // The joint order is parent-before-child by construction of the JointId
+    // enum, so one pass in order is a full tree walk.
+    for (int j = 0; j < kJointCount; ++j) {
+        const JointConfig3D& jc = config_.joints[static_cast<size_t>(j)];
+        const JointFrame frame = frameOf(world, *this, j);
+        const Quat relative = jointRotations ? jointRotations[j] : Quat::identity();
+
+        // relativeRotation() is conj(parent) * child * conj(reference), so the
+        // child's orientation is the inverse of that relation. Deriving it here
+        // rather than writing it down means the two cannot disagree.
+        const Quat parentOrientation = outOrientations[jc.parent];
+        const Quat childOrientation = parentOrientation * relative * frame.referenceRotation;
+
+        const Vec3 anchorWorld =
+            outPositions[jc.parent] + rotate(parentOrientation, frame.localAnchorParent);
+        outOrientations[jc.child] = childOrientation;
+        outPositions[jc.child] = anchorWorld - rotate(childOrientation, frame.localAnchorChild);
+    }
+}
+
+void Humanoid3D::forwardKinematicsVelocity(const World3D& world, const Vec3& rootVelocity,
+                                           const Vec3& rootAngularVelocity, const Vec3* jointRates,
+                                           const Vec3* positions, const Quat* orientations,
+                                           Vec3* outVelocities,
+                                           Vec3* outAngularVelocities) const {
+    outVelocities[kPelvis] = rootVelocity;
+    outAngularVelocities[kPelvis] = rootAngularVelocity;
+
+    for (int j = 0; j < kJointCount; ++j) {
+        const JointConfig3D& jc = config_.joints[static_cast<size_t>(j)];
+        const JointFrame frame = frameOf(world, *this, j);
+
+        // The joint rate arrives in the parent's frame, matching how the
+        // observation and the reward report it.
+        const Vec3 relativeSpin =
+            jointRates ? rotate(orientations[jc.parent], jointRates[j]) : Vec3(0, 0, 0);
+        outAngularVelocities[jc.child] = outAngularVelocities[jc.parent] + relativeSpin;
+
+        // Both bodies share the anchor point, so its velocity computed from the
+        // parent is also its velocity computed from the child.
+        const Vec3 anchorWorld =
+            positions[jc.parent] + rotate(orientations[jc.parent], frame.localAnchorParent);
+        const Vec3 anchorVelocity =
+            outVelocities[jc.parent] +
+            cross(outAngularVelocities[jc.parent], anchorWorld - positions[jc.parent]);
+        outVelocities[jc.child] =
+            anchorVelocity - cross(outAngularVelocities[jc.child], anchorWorld - positions[jc.child]);
+    }
+}
+
+void Humanoid3D::applyPose(World3D& world, const Vec3* positions, const Quat* orientations,
+                           const Vec3* velocities, const Vec3* angularVelocities) const {
+    for (int i = 0; i < kLinkCount; ++i) {
+        RigidBody3D& body = link(world, i);
+        body.position = positions[i];
+        body.orientation = normalize(orientations[i]);
+        body.velocity = velocities ? velocities[i] : Vec3(0, 0, 0);
+        body.angularVelocity = angularVelocities ? angularVelocities[i] : Vec3(0, 0, 0);
+        body.clearForces();
+        body.refreshInertiaWorld();
+    }
+}
+
+Real Humanoid3D::groundedRootHeight(const World3D& world, const Quat& rootOrientation,
+                                    const Quat* jointRotations) const {
+    std::vector<Vec3> positions(kLinkCount);
+    std::vector<Quat> orientations(kLinkCount);
+    forwardKinematics(world, Vec3(0, 0, 0), rootOrientation, jointRotations, positions.data(),
+                      orientations.data());
+
+    Real lowest = std::numeric_limits<Real>::max();
+    for (int i = 0; i < kLinkCount; ++i) {
+        const LinkConfig3D& lc = config_.links[static_cast<size_t>(i)];
+        const Vec3 axis = rotate(orientations[i], Vec3(0, lc.halfLength, 0));
+        lowest = std::min(lowest, positions[i].y - std::abs(axis.y) - lc.radius);
+    }
+    return -lowest;
 }
 
 Vec3 Humanoid3D::centerOfMass(const World3D& world) const {

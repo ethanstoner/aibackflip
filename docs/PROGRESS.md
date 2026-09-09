@@ -1165,3 +1165,154 @@ conclusion rests on.
 
 Two rows in the small table were inside the noise and should not be read as findings: soft at
 300 N·s (33% against the undisturbed 38%) and the 200 N·s row's 83/83 tie.
+
+---
+
+## M9: the 3D engine, and the figure stands
+
+### What was built
+
+- **`RigidBody3D`**: capsule bodies with a real inertia tensor. The body-frame
+  tensor is diagonal, because a capsule's principal axes are its own, so it is
+  three numbers and the world inverse is rebuilt from the orientation.
+- **`Collision3D`**: capsule against half-space and against capsule, with skew
+  segments, a two-direction friction basis, and a deterministic fallback normal
+  for exactly coincident bodies.
+- **`Joint3D`**: ball joints with separate cone and twist limits, and hinges
+  with the two-axis angular lock that 2D got for free.
+- **`World3D`**, **`Humanoid3D`** (13 links, 6 ball joints, 6 hinges, 24
+  actions), **`Observation3D`** (204 values), **`Env3D`**, and a 3D renderer.
+- `EnvBatch` and `EnvServer` became templates over the environment rather than
+  copies, since the two figures differ in the SPEC action description and the
+  observation names and in nothing else.
+
+Python needed **no change at all**. The observation went from 111 to 204 and the
+action from 12 to 24, and the SPEC handshake carried it, because the client had
+always read its dimensions off the wire rather than hardcoding them. That was
+the point of the handshake, and this was the first time it was tested.
+
+### Result
+
+`stand3d_v2_best.pt`, 19.1M env steps, about an hour:
+
+| | |
+|---|---|
+| Episodes reaching the 1000-step limit | 38 of 40 |
+| Return | mean +4189, best +4367 |
+| Pelvis height | 0.989 of its rest height |
+| Head height | 1.463 m against a 1.50 m rest |
+
+Rendered and inspected: upright, both feet down, torso vertical, stance wider
+than the 2D figure's. Wide is the right answer here, since the ankles are hinges
+with no roll and a sideways lean has to be met with the hips.
+
+### Sampling omega once a step makes a tumbling body gain energy
+
+The measurement that chose the orientation integrator. Energy gain on a capsule
+spun about a non-principal axis, as a percentage of its initial kinetic energy:
+
+| hz | seconds | first-order | exact rotation | midpoint |
+|---|---|---|---|---|
+| 240 | 1 | +25.73% | +25.74% | +0.0136% |
+| 240 | 5 | **+2017%** | +2041% | +0.0650% |
+| 2400 | 1 | +1.36% | +1.36% | +0.1127% |
+
+At the rate this engine runs, the obvious implementation multiplies a tumbling
+body's kinetic energy by twenty over five seconds. A backflip is a tumbling body
+in free flight, so this is not an edge case.
+
+The first suspect was the quaternion update and it was wrong: adding an exact
+exponential map moved the drift by less than 0.02 percentage points. Angular
+velocity is not constant across a step even with no torque, because the inertia
+tensor turns underneath it, so sampling omega once at the start is first order
+however exactly the rotation is then applied. `integrateOrientation` holds
+angular momentum fixed and re-derives omega at the midpoint instead.
+
+Angular momentum is conserved to machine precision in **every** column above, so
+the usual momentum check passes the broken version without complaint.
+
+The midpoint column gets *worse* at 2400 Hz than at 240. Its truncation error is
+already under the single-precision noise floor, so more steps only accumulate
+more rounding, and substepping is not a way to buy accuracy here.
+
+### The half-space normal, hidden by a test that asserted the bug
+
+The manifold normal has to run from the capsule *into* the ground, because the
+solver pushes body A along `-normal`. The implementation used `plane.normal`,
+and the test written alongside it asserted `+1`. So the test passed, and a
+dropped capsule fell to y = -599 over four seconds with every contact test
+green.
+
+Second time in this project that a test encoded the bug rather than catching it,
+after the disturbance sweep in M8b. Both times the fix was the same: assert the
+*mechanism* rather than the observed value.
+
+### Joint momentum drift, after three wrong diagnoses
+
+A jointed tumbling pair loses 3.6% of its angular momentum over three seconds.
+The number alone says nothing about whether that is a bug. What settled it was
+how it responded to the things that would distinguish the causes:
+
+| varied | from | to | drift |
+|---|---|---|---|
+| velocity iterations | 5 | 80 | 3.567% to 3.568% |
+| position iterations | 4 | 0 | 3.567% to 3.695% |
+| step rate | 120 Hz | 1920 Hz | 6.77% to 0.49% |
+
+Flat in both iteration counts and cleanly first order in dt, so it is truncation
+error converging to zero, not a constraint destroying momentum. The test asserts
+the convergence *ratio*, because the ratio is what tells the two apart.
+
+A 2.5 point chunk of the original figure also turned out to be the test rig
+itself, which placed the joint anchors 1 cm apart at t=0 so the joint yanked
+them together in the first few steps.
+
+### 64 environments does not fit in one datagram
+
+The bridge sends one STATE datagram per control step. The 2D figure at 32
+environments used about 26 KB of a 60 KB budget, which made the ceiling feel far
+away. The 3D figure at 64 environments needs **109,568 bytes**.
+
+The worst case is every environment finishing on the same step, because the
+final-observation block is then as large as the observation block, and with
+synchronised resets that happens on the first step and then periodically
+forever.
+
+The server now computes that worst case and refuses at startup with the number:
+*"a batch of 64 environments needs 109568 bytes ... the most that fits is 35"*.
+Before, it connected, allocated, and failed on the first step with a generic
+message.
+
+### A unit mismatch that read as the opposite result
+
+The first 3D standing run evaluated at **"mean pelvis height: 0.607 of rest
+height"**, which sits just above the 0.55 termination threshold and reads
+exactly like the reward hacking found three times earlier in this project: a
+policy crouching as low as the rules allow to collect the alive bonus. It was
+about to be written up that way.
+
+Nothing was physically wrong. The reward and the termination both divided by the
+pelvis's own rest height and were correct. Only the observation used a different
+convention, dividing by the *whole body* height, so an upright figure read 0.607
+instead of 1.0 and a diagnostic labelled "of rest height" turned a working
+policy into a deep crouch.
+
+What settled it was rendering the frames, where the figure is plainly standing.
+
+Both figures now use the same three height scales, standing reads 1.0 in both,
+and a test asserts it that mirrors the 2D one. The checkpoint trained against the
+old scaling was retrained rather than kept.
+
+The lesson is not "check your units". It is that a *diagnostic* can be wrong in a
+way that looks exactly like a finding, and the only thing that caught it was
+looking at the picture.
+
+### Not done in M9
+
+- **No 3D reference motions.** The five imitation reward terms report zero
+  rather than something plausible, and will until M10 gives them an input.
+- **The renderer has no shadows and no contact markers**, so it is enough to
+  verify a pose and not yet enough to debug a contact.
+- Throughput is about 5,400 env-steps/s at 32 environments, against roughly
+  45,000 for the 2D figure at 64. Some of that is the smaller batch and the rest
+  is 13 bodies of 3D solver work; it has not been profiled.

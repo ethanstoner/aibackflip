@@ -4,7 +4,7 @@ Defined in `cpp/humanoid/Observation.cpp` and `cpp/humanoid/RewardTerms.cpp`. Th
 every element travel with the SPEC handshake, so the trainer never hardcodes an index and
 `ObservationLayout.fieldNames()` is checked against the dimension by a test.
 
-## Observation — 111 values
+## Observation: 111 values
 
 The 2D humanoid has 13 links and 12 joints; "non-root" below means the 12 links other than the
 pelvis, in this order: chest, head, upper/lower arm L, upper/lower arm R, upper/lower leg L,
@@ -52,17 +52,17 @@ kinematics. This follows DeepMimic, which does the same.
 **Normalisation is split.** The simulator divides lengths by the figure's own dimensions, so a
 value means the same thing if the humanoid is rescaled. Velocities are left in SI units, because
 their spread depends on the task rather than the body, and the running mean/std normaliser in
-Python handles them. Arbitrary constants like "÷ 10" are deliberately absent — they would be
+Python handles them. Arbitrary constants like "÷ 10" are deliberately absent: they would be
 guesses with no physical meaning, and the running normaliser does the job properly.
 
 **Phase is reserved.** It stays 0 until imitation learning lands in M7. It is in the layout from
 the start so the observation size does not change under the policy later.
 
-## Reward terms — 13 values
+## Reward terms: 13 values
 
 The simulator computes raw, unweighted terms; Python applies the weights and sums them
 (`python/communication/vec_env.py`). Weights become a config change rather than a rebuild, and
-every component gets logged separately — the only practical way to catch reward hacking, since
+every component gets logged separately, the only practical way to catch reward hacking, since
 an exploit shows up as one term saturating while the others flatline.
 
 **Every term is a non-negative magnitude. The sign lives in the weight.** Terms named `*_cost`
@@ -85,8 +85,8 @@ or bad.
 | 11 | `torque_cost` | [0, 1] | mean \|torque\| ÷ maxTorque across joints |
 | 12 | `joint_limit_cost` | ≥ 0 | worst limit violation (radians) |
 
-`uprightness` compares each link against **its own rest orientation**, so a foot — which rests
-horizontal — is not permanently scored as fallen over.
+`uprightness` compares each link against **its own rest orientation**, so a foot, which rests
+horizontal, is not permanently scored as fallen over.
 
 Starting weights for the standing task live in `RewardWeights.standing()`. They are a starting
 point, not a tuned result; the per-component logs exist precisely so they can be argued with
@@ -104,7 +104,7 @@ than absolute distances, so they scale with the figure.
 | `pelvis_low` | pelvis height < 0.55 × rest height |
 | `head_low` | head height < 0.55 × rest head height |
 | `chest_fallen` | cos of the chest's tilt < 0.2 (about 78° over) |
-| `time_limit` | episode step reached `max_episode_steps` — reported as **truncated**, not terminated |
+| `time_limit` | episode step reached `max_episode_steps`, reported as **truncated**, not terminated |
 
 Truncation is kept strictly distinct from termination. Hitting the time limit is not a failure,
 and the value function has to bootstrap through it; collapsing the two flags into one is the

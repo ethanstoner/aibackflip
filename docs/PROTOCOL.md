@@ -9,7 +9,7 @@ against packets written by `aibf_fixture`.
 
 - **Little-endian, always.** Every field is written a byte at a time. Nothing depends on host
   byte order, and the header layout is pinned by a test on both sides rather than only
-  round-tripped — a round trip alone would pass even if both implementations were big-endian.
+  round-tripped: a round trip alone would pass even if both implementations were big-endian.
 - **No struct punning.** Nothing is memcpy'd across the boundary. C++ padding rules and numpy
   dtype alignment are free to disagree, and a mismatch there surfaces as a policy learning from
   garbage rather than as a crash.
@@ -22,7 +22,7 @@ against packets written by `aibf_fixture`.
 - **Maximum datagram: 60000 bytes.** Inside the 65507-byte UDP payload limit with room to
   spare. At 32 environments and a 111-dimensional observation a STATE packet is about 15 KB.
 
-## Header — 16 bytes, on every message
+## Header: 16 bytes, on every message
 
 | Offset | Size | Field | Notes |
 |---|---|---|---|
@@ -104,7 +104,7 @@ interval constantly, and extrapolating would hand the solver targets outside the
 limits for the limit constraints to fight every step.
 
 `reset mask` force-restarts an environment instead of stepping it, which is how a caller begins
-a fresh rollout mid-stream. Ordinary episode ends do not need it — see below.
+a fresh rollout mid-stream. Ordinary episode ends do not need it. See below.
 
 ## Auto-reset and the final observation
 
@@ -119,7 +119,7 @@ Environments reset themselves when an episode ends. In the STATE that reports th
 Both halves are load-bearing. Auto-reset keeps every step a real transition, so a rollout is a
 fixed (steps × environments) block with no holes to mask out. The final observation is still
 required because a **truncated** episode has to bootstrap its value estimate from the state it
-was cut off in — dropping it teaches the critic that reaching the time limit is worth zero,
+was cut off in. Dropping it teaches the critic that reaching the time limit is worth zero,
 which is the classic time-limit bootstrapping bug.
 
 ## Reliability
@@ -157,7 +157,7 @@ Localhost, RTX 4090 workstation, one `aibf_env` process, `python/random_agent.py
 Across 2002 round trips at 25 environments: zero timeouts, zero stale packets, zero malformed
 packets.
 
-The single-environment figure is the transport ceiling — about 6 800 round trips per second,
+The single-environment figure is the transport ceiling, about 6 800 round trips per second,
 dominated by Python-side overhead rather than by the socket. At 32 environments the loop only
 needs 1 073 of those, so there is roughly **6x headroom** and the bridge is not the limiting
 factor; physics is. Headless physics alone runs at 37 700 env-steps/s for the same batch, so

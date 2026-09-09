@@ -30,8 +30,8 @@ torques high enough to throw a humanoid into the air, which a single 60 Hz step 
 
 `cpp/core/Math.h` is dependency-free: Vec2/Vec3/Vec4, Mat2/Mat3/Mat4, and a quaternion type.
 The plan originally called for GLM, but the physics needs quaternion integration,
-skew-symmetric matrices, inertia-tensor inverses, and a 2x2 block solve — none of which GLM
-provides for free — and the remainder (projection matrices) is about sixty lines. Owning the
+skew-symmetric matrices, inertia-tensor inverses, and a 2x2 block solve, none of which GLM
+provides for free. The remainder (projection matrices) is about sixty lines. Owning the
 whole thing means every operation the solver depends on has a test pinning its convention,
 which matters more here than saving those sixty lines.
 
@@ -90,8 +90,8 @@ Full wire format: `docs/PROTOCOL.md` (written in M3).
 
 ### Reward components in C++, weights in Python
 
-The simulator computes raw reward *terms* — height, uprightness, contact state, tracking
-errors — because it owns the contacts and the centre of mass. It ships the vector of terms;
+The simulator computes raw reward *terms* (height, uprightness, contact state, tracking
+errors) because it owns the contacts and the centre of mass. It ships the vector of terms;
 Python applies configurable weights and sums them.
 
 This buys two things. Reward weights become a Python config change rather than a C++ rebuild,
@@ -124,13 +124,13 @@ from the start, not retrofitted when training stalls.
 
 ## Testing approach
 
-The C++ suite (`cpp/tests/`) uses a small self-registering framework in `core/Test.h` — no
+The C++ suite (`cpp/tests/`) uses a small self-registering framework in `core/Test.h` with no
 external dependency, so a fresh clone can run the physics tests before fetching anything.
 
 Physics correctness is asserted numerically, not by looking at the window: impulse responses
 against closed-form results, joint anchor drift under load, energy behaviour, and finite-
 difference checks against the analytic formulas the solver uses. `Vec2.pointVelocityMatchesFiniteDifference`
-is the template — it checks `omega x r` against the numerical derivative of an actual
+is the template: it checks `omega x r` against the numerical derivative of an actual
 rotation rather than restating the same formula twice.
 
 The Python suite (`python/tests/`) covers the protocol codec, action mapping, reward

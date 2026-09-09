@@ -5,7 +5,7 @@ is only marked done when its exit criterion was actually observed, not when the 
 
 ---
 
-## M0 — scaffold, build system, math core
+## M0: scaffold, build system, math core
 
 **Status:** done (2026-09-08)
 
@@ -13,13 +13,13 @@ is only marked done when its exit criterion was actually observed, not when the 
 
 - CMake 3.20 project, C++20, MSVC and GCC warning sets. GLFW 3.4 pulled in via `FetchContent`
   (shallow clone); OpenGL located through `find_package`.
-- `cpp/core/Math.h` — Vec2/Vec3/Vec4, Mat2/Mat3/Mat4, quaternions. Column-major matrices,
+- `cpp/core/Math.h`: Vec2/Vec3/Vec4, Mat2/Mat3/Mat4, quaternions. Column-major matrices,
   Box2D 2D-cross conventions, first-order quaternion integration with renormalization, slerp
   with double-cover handling, projection and view matrices.
-- `cpp/core/Rng.h` — PCG32 with uniform, bounded-integer (rejection sampled), Gaussian
+- `cpp/core/Rng.h`: PCG32 with uniform, bounded-integer (rejection sampled), Gaussian
   (Marsaglia polar), unit-circle and unit-sphere sampling.
-- `cpp/core/Test.h/.cpp` — self-registering, dependency-free test framework with a name filter.
-- `cpp/main.cpp` — argument parsing plus a `--check-gl` probe that opens a hidden GL 3.3 core
+- `cpp/core/Test.h/.cpp`: self-registering, dependency-free test framework with a name filter.
+- `cpp/main.cpp`: argument parsing plus a `--check-gl` probe that opens a hidden GL 3.3 core
   context, so toolchain breakage surfaces immediately rather than in M1.
 - Python package skeleton, `pytest.ini`, `conftest.py` that puts `python/` on `sys.path`.
 - `scripts/build.ps1`, `scripts/test.ps1`.
@@ -61,7 +61,7 @@ is only marked done when its exit criterion was actually observed, not when the 
    `a*b - a*b` to a literal zero and warns about a division the guard above it already
    prevents, so C4723 is now suppressed for that one function with a comment explaining that
    anything reaching the division has `|det| >= 1e-12`. The guard itself was never wrong.
-3. **RNG determinism test failed — and the test was the bug.** It compared `a.nextU32()` to
+3. **RNG determinism test failed, and the test was the bug.** It compared `a.nextU32()` to
    `b.nextU32()` while also calling `a.uniform()` in the same loop, so `a` ran two draws ahead
    of `b` after the first iteration. Split into three focused cases: same seed reproduces,
    different seeds diverge, different streams diverge.
@@ -82,14 +82,14 @@ is only marked done when its exit criterion was actually observed, not when the 
 
 ### Next
 
-M1 — 2D rigid-body physics, floor collision, the 13-body humanoid with 12 revolute joints,
+M1: 2D rigid-body physics, floor collision, the 13-body humanoid with 12 revolute joints,
 and mouse interaction. Exit criterion: the humanoid collapses under gravity in a way that
 looks and measures like rigid-body dynamics, joints hold their anchors under load, and
 dragging a limb with the mouse moves the whole body through the constraint chain.
 
 ---
 
-## M1 — 2D physics engine and humanoid
+## M1: 2D physics engine and humanoid
 
 **Status:** done (2026-09-08)
 
@@ -97,30 +97,30 @@ dragging a limb with the mouse moves the whole body through the constraint chain
 
 **Physics** (`cpp/physics/`)
 
-- `RigidBody2D` — capsule bodies (segment along local +Y swept by a radius; a disc is
+- `RigidBody2D`: capsule bodies (segment along local +Y swept by a radius; a disc is
   `halfLength = 0`), with an exact rectangle-plus-two-half-discs inertia derivation, impulse
   and force application, and `setCapsuleWithMass` which back-solves density from a named mass.
-- `Collision2D` — segment/segment closest points, capsule vs half-space (up to two contact
+- `Collision2D`: segment/segment closest points, capsule vs half-space (up to two contact
   points, so a foot lies flat instead of pivoting on one corner), capsule vs capsule with a
   finite fallback normal for exactly coincident bodies.
-- `Joint2D` — revolute joint stacking a motor, two one-sided limit constraints, and a 2-DOF
+- `Joint2D`: revolute joint stacking a motor, two one-sided limit constraints, and a 2-DOF
   point constraint, solved in that order so the anchor gets the final say.
-- `World2D` — sequential-impulse solver with warm starting, speculative contacts, Coulomb
+- `World2D`: sequential-impulse solver with warm starting, speculative contacts, Coulomb
   friction, restitution with a resting threshold, a dedicated position pass, collision groups,
   a soft mouse spring, NaN detection, and diagnostic stats.
 
-**Humanoid** (`cpp/humanoid/`) — 13 links, 12 revolute joints, 69 kg, 1.64 m. Authored as a
+**Humanoid** (`cpp/humanoid/`): 13 links, 12 revolute joints, 69 kg, 1.64 m. Authored as a
 rest pose (world position and angle per link, plus each joint's world pivot); local anchors
 and joint reference angles are derived from it, which is what makes "every joint reads zero
 in the rest pose" true by construction rather than by luck. JSON load/save with per-name
 partial overrides, plus a `validate()` that catches the authoring errors that would otherwise
 appear as a figure exploding on step one.
 
-**Rendering** (`cpp/engine/`) — hand-written GL 3.3 core loader (29 entry points), GLFW
+**Rendering** (`cpp/engine/`): hand-written GL 3.3 core loader (29 entry points), GLFW
 window with a polled input snapshot, batched 2D renderer, and debug overlays for contacts,
 joints, centre of mass, support polygon, joint targets, velocities and motion trails.
 
-**Tooling** — `core/Png.h` writes PNGs with stored-deflate blocks, so the simulator can
+**Tooling**: `core/Png.h` writes PNGs with stored-deflate blocks, so the simulator can
 screenshot itself with no image library; `--capture` runs a fixed number of simulated seconds
 and writes frames, which is how rendered output gets checked rather than asserted.
 `aibf_diag` reports measurements instead of assertions.
@@ -146,7 +146,7 @@ Measured numbers, from `aibf_diag`:
 
 | Measurement | Result |
 |---|---|
-| Joint drift, 5-link chain yanked for 6 s — **position solver** | **1.8 mm** worst case |
+| Joint drift, 5-link chain yanked for 6 s, **position solver** | **1.8 mm** worst case |
 | Same, Baumgarte velocity bias only | 21.4 mm worst case |
 | Resting penetration, humanoid, 30 s | 1.3 mm, constant (no sinking) |
 | Anchor error at rest, 30 s | 6e-8 m |
@@ -155,7 +155,7 @@ Measured numbers, from `aibf_diag`:
 | Headless throughput, 1 world | 46 100 steps/s (768x real time) |
 
 Two of those are worth reading carefully. **Energy drift is monotonically negative** at every
-horizon — the solver only ever loses energy, never gains it. A constraint solver that gains
+horizon: the solver only ever loses energy, never gains it. A constraint solver that gains
 energy turns joints into motors and launches the figure, so the sign matters more than the
 magnitude here, and 1 s of backflip does not care about a 60 s figure.
 
@@ -168,7 +168,7 @@ Visual verification (`--capture`, frames inspected):
 
 - Rest pose renders standing with both feet flat on the ground and every segment meeting at
   its joint.
-- Unactuated, the figure collapses like a ragdoll — buckling at the knees, folding at the
+- Unactuated, the figure collapses like a ragdoll: buckling at the knees, folding at the
   waist, limbs splaying, and settling on the floor.
 - With motors holding the rest pose it stands still indefinitely.
 
@@ -176,7 +176,7 @@ Visual verification (`--capture`, frames inspected):
 
 Worth stating plainly, because the screenshot is misleading. With motors enabled the figure
 stands at a pelvis height of 0.9989 m for 30 simulated seconds without drifting. That is not
-balance — it is a perfectly symmetric equilibrium held by joint stiffness, with nothing
+balance: it is a perfectly symmetric equilibrium held by joint stiffness, with nothing
 disturbing it. Shoving it says so:
 
 | Sideways impulse on the pelvis | Outcome after 4 s |
@@ -192,7 +192,7 @@ Learning to balance is M5, and being pushed and recovering is M6.
 
 1. **Three joint tests failed with anchor errors 10-100x the threshold.** Cause: the test
    scaffolding pinned a rod to a static anchor body that physically overlapped it, so contact
-   forces were fighting the joint. Real behaviour, wrong setup — connected bodies necessarily
+   forces were fighting the joint. Real behaviour, wrong setup: connected bodies necessarily
    overlap at their pivots, which is exactly what collision groups are for. Fixing the tests
    to use a shared group dropped the pendulum's drift from >1e-4 m to under 1e-9 m. The
    humanoid does the same thing.
@@ -231,7 +231,7 @@ Learning to balance is M5, and being pushed and recovering is M6.
 
 ### Next
 
-M2 — the motor implementation landed early (it was cheaper to write while the solver was in
+M2: the motor implementation landed early (it was cheaper to write while the solver was in
 hand) and is already covered by six tests plus the perturbation table above. M2 therefore
 narrows to: an interactive joint-posing mode for driving targets by keyboard, a torque/gain
 sweep to check the defaults are sane per joint rather than plausible in aggregate, and
@@ -239,7 +239,7 @@ confirming limbs are driven rather than teleported for every joint, not just the
 
 ---
 
-## M2 — actuated joints
+## M2: actuated joints
 
 **Status:** done (2026-09-08)
 
@@ -249,7 +249,7 @@ The motor itself shipped with M1, so M2 is about proving it works on all twelve 
 than on the two the pendulum tests covered.
 
 - **Interactive posing.** Up/down selects a joint, left/right drives its target, `0` returns
-  every target to the rest pose. Driving a target auto-enables the motors — silently moving a
+  every target to the rest pose. Driving a target auto-enables the motors, silently moving a
   value nothing reads is a confusing dead end. The window title shows the selected joint's
   commanded and actual angle side by side, so tracking error is visible while posing.
 - **`--pin`** freezes the pelvis so joint ranges can be driven and inspected without the figure
@@ -274,7 +274,7 @@ impulse     = -softMass * (Cdot + bias + gamma*accumulated),  clamped to +/- max
 
 The explicit form is only stable while `kp*h^2` stays below the joint's inertia, which rules
 out the stiffnesses an acrobatic motion needs. `JointMotor.staysStableAtStiffnessThatWouldBlowUpAnExplicitPD`
-runs kp = 500 000 at 1/240 s — roughly 2.4x past the explicit stability limit for that link —
+runs kp = 500 000 at 1/240 s, roughly 2.4x past the explicit stability limit for that link,
 and tracks its target to 0.05 rad with zero velocity clamp events.
 
 ### Tested
@@ -298,7 +298,7 @@ Every joint reaches its commanded angle, worst error 0.0111 rad (0.64°), and no
 than 11% of its torque ceiling to hold. The residual error is not a defect: a proportional
 motor holding a load settles at (load torque)/kp by definition.
 
-Peak torque hits 100% of the ceiling on most joints, and that is meaningless — a step command
+Peak torque hits 100% of the ceiling on most joints, and that is meaningless: a step command
 starts with an enormous `kp*error` and clamps instantly. Only the settled holding torque says
 whether a joint is out of authority, which is why the diagnostic now reports both.
 
@@ -310,17 +310,17 @@ Robustness under conditions that match an untrained policy:
   stable, anchor error under 1e-2 m, penetration under 0.02 m, every body finite.
 
 Action mapping is pinned in both directions: -1 maps to the lower limit, +1 to the upper, 0 to
-the midpoint, and out-of-range samples clamp rather than extrapolate. That last one matters —
+the midpoint, and out-of-range samples clamp rather than extrapolate. That last one matters:
 a Gaussian policy samples outside [-1, 1] constantly, and extrapolating would hand the solver
 targets outside the joint's own limits for the limit constraints to fight every step.
 
 Visual verification (`--pose <name> --pin`, frames inspected):
 
-- **squat** — torso leaning slightly forward, thighs forward, knees bent, shins back, foot flat,
+- **squat**: torso leaning slightly forward, thighs forward, knees bent, shins back, foot flat,
   arms extended forward. Worst tracking error 0.0105 rad.
-- **tuck** — knees drawn to the chest, arms folded, torso curled, head tucked. Recognisably the
+- **tuck**: knees drawn to the chest, arms folded, torso curled, head tucked. Recognisably the
   shape a backflip needs. Worst tracking error 0.0174 rad.
-- **reach**, **lunge** — as commanded, worst errors 0.0040 and 0.0111 rad.
+- **reach**, **lunge**: as commanded, worst errors 0.0040 and 0.0111 rad.
 
 The squat confirmed every joint sign convention derived on paper: hip flexion positive, knee
 flexion negative, ankle dorsiflexion positive, waist flexion negative, shoulder forward
@@ -341,13 +341,13 @@ exactly why it was worth rendering rather than only asserting angles.
 
 ### Next
 
-M3 — the C++/Python UDP bridge: batched little-endian protocol with a HELLO/SPEC handshake,
+M3 is the C++/Python UDP bridge: batched little-endian protocol with a HELLO/SPEC handshake,
 the environment batch on the C++ side, the client and vectorised adapter on the Python side,
 and a random-action loop proving both directions end to end with timeouts and recovery.
 
 ---
 
-## M3 — the C++ to Python bridge
+## M3: the C++ to Python bridge
 
 **Status:** done (2026-09-08)
 
@@ -357,22 +357,22 @@ checkpointing.
 
 ### Implemented
 
-- **`cpp/humanoid/Observation.cpp`** — a 111-value observation. Layout, rationale and the exact
+- **`cpp/humanoid/Observation.cpp`**: a 111-value observation. Layout, rationale and the exact
   index map are in [`docs/OBSERVATIONS.md`](OBSERVATIONS.md).
-- **`cpp/humanoid/RewardTerms.cpp`** — 13 raw, unweighted reward components. The simulator
+- **`cpp/humanoid/RewardTerms.cpp`**: 13 raw, unweighted reward components. The simulator
   computes terms; Python applies weights and sums.
-- **`cpp/env/Env2D.cpp`** — the episodic environment: control at 60 Hz over four 240 Hz physics
+- **`cpp/env/Env2D.cpp`**: the episodic environment: control at 60 Hz over four 240 Hz physics
   substeps, reset noise, six named termination reasons, truncation kept distinct from
   termination, and a disturbance hook for M6.
-- **`cpp/env/EnvBatch.cpp`** — N environments with auto-reset and final-observation capture.
-- **`cpp/net/Protocol.cpp`**, **`UDPSocket.cpp`**, **`EnvServer.cpp`** — the wire format, a thin
+- **`cpp/env/EnvBatch.cpp`**: N environments with auto-reset and final-observation capture.
+- **`cpp/net/Protocol.cpp`**, **`UDPSocket.cpp`**, **`EnvServer.cpp`**: the wire format, a thin
   socket wrapper, and the request/response server. Documented in
   [`docs/PROTOCOL.md`](PROTOCOL.md).
-- **`aibf_env`** — the environment host. `--headless` never touches OpenGL; `--render` shows one
+- **`aibf_env`**: the environment host. `--headless` never touches OpenGL; `--render` shows one
   environment while serving the same batch; `--capture` screenshots what a policy is doing.
-- **`aibf_fixture`** — writes reference packets for Python to decode and verifies packets Python
+- **`aibf_fixture`**: writes reference packets for Python to decode and verifies packets Python
   encoded.
-- **Python** — `communication/protocol.py`, `client.py`, `vec_env.py`, and `random_agent.py`.
+- **Python**: `communication/protocol.py`, `client.py`, `vec_env.py`, and `random_agent.py`.
 
 ### Build / run
 
@@ -392,8 +392,8 @@ private port and drive it over a real socket, plus 9 cross-language protocol tes
 **Cross-language agreement is tested in both directions.** Round-tripping a packet inside one
 language proves only that a codec is self-consistent. `aibf_fixture` writes SPEC and STATE
 packets that the Python suite decodes and asserts on, and Python writes an ACTION packet that
-the C++ side decodes and asserts on. The fixture values are deliberately awkward — negative
-zero, denormals, `12345.6789f`, `UINT32_MAX` — and the comparison is bit-exact via `tobytes()`,
+the C++ side decodes and asserts on. The fixture values are deliberately awkward (negative
+zero, denormals, `12345.6789f`, `UINT32_MAX`), and the comparison is bit-exact via `tobytes()`,
 not `approx`. Negative zero surviving as negative zero is checked explicitly.
 
 **Robustness is fuzzed rather than argued.** 3000 random buffers (a third with a valid preamble,
@@ -419,7 +419,7 @@ Zero timeouts, zero stale packets and zero malformed packets across 2002 round t
 environments.
 
 **The transport is not the bottleneck.** The single-environment figure is the round-trip
-ceiling — about 6 800/s, dominated by Python-side overhead rather than the socket. At 32
+ceiling, about 6 800/s, dominated by Python-side overhead rather than the socket. At 32
 environments the loop needs 1 073 of those, leaving roughly **6x headroom**. Against the
 37 700 env-steps/s that headless physics alone achieves for the same batch, the bridge costs
 about 9%. The plan's concern about UDP becoming the bottleneck is retired, and shared memory
@@ -437,7 +437,7 @@ Three things were designed one way, found wanting, and changed. All three would 
 more expensive to discover during M5.
 
 1. **Action 0 mapped to the middle of each joint range.** For the knee's `[-2.6, 0.05]` that is
-   1.3 radians of flexion, so a freshly initialised policy — which outputs values near zero —
+   1.3 radians of flexion, so a freshly initialised policy, which outputs values near zero,
    would begin every rollout by folding the figure into a deep squat, and learning would have
    to climb out of that before it could start. The mapping is now piecewise-linear about the
    **rest pose**: 0 commands the rest angle, ±1 the limits. Joint limits are now validated to
@@ -450,7 +450,7 @@ more expensive to discover during M5.
    packet carries the observation each finished episode ended on. Both halves matter: auto-reset
    keeps every step a real transition, and the final observation is what a **truncated** episode
    bootstraps its value estimate from. Dropping it teaches the critic that reaching the time
-   limit is worth zero — the classic time-limit bootstrapping bug.
+   limit is worth zero, the classic time-limit bootstrapping bug.
 
 3. **The server exited when a client disconnected.** A trainer that crashes and restarts should
    be able to reconnect without the simulator being relaunched too. BYE now makes the server
@@ -460,7 +460,7 @@ more expensive to discover during M5.
 ### Problems hit and how they were resolved
 
 1. **Access violation in every environment test.** `EnvConfig`'s `Humanoid2DConfig` member was
-   default-constructed, and *that* type's default has empty link and joint vectors — so the
+   default-constructed, and *that* type's default has empty link and joint vectors, so the
    first index of `kPelvis` walked off the end of an empty vector. A struct whose default state
    is unusable is a trap; the default is now the real figure, and a test asserts a
    default-constructed `EnvConfig` validates.
@@ -480,7 +480,7 @@ more expensive to discover during M5.
 ### Known issues
 
 - The batch is single-threaded. At 34 000 env-steps/s with 6x transport headroom, threading
-  would only help if the physics budget became the binding constraint — it has not.
+  would only help if the physics budget became the binding constraint. It has not.
 - `--render` costs throughput because serving and drawing share a thread. Fine for watching;
   training runs headless.
 - The reward weights in `RewardWeights.standing()` are a starting point, not a tuned result.
@@ -488,22 +488,22 @@ more expensive to discover during M5.
 
 ### Next
 
-M4 — observation normalisation with running mean/std saved alongside checkpoints, the
+M4: observation normalisation with running mean/std saved alongside checkpoints, the
 actor-critic network (tanh MLP, Gaussian policy with a state-independent log-std), and
 checkpoint save/load. Then M5 puts PPO on top of it and finds out whether the humanoid can
 learn to stand.
 
 ---
 
-## M4 — normalisation, policy, checkpoints
+## M4: normalisation, policy, checkpoints
 
 **Status:** done (2026-09-08)
 
 ### Implemented
 
-- **`python/rl/normalization.py`** — `RunningMeanStd` (Chan's parallel algorithm),
+- **`python/rl/normalization.py`**: `RunningMeanStd` (Chan's parallel algorithm),
   `ObservationNormalizer` with clipping and a freeze switch, and `ReturnNormalizer`.
-- **`python/rl/policy.py`** — `ActorCritic` with separate actor and critic trunks, tanh
+- **`python/rl/policy.py`**: `ActorCritic` with separate actor and critic trunks, tanh
   activations, a tanh-bounded action mean and a learned state-independent log-std; plus
   checkpoint save/load.
 
@@ -524,7 +524,7 @@ the initial mean action is under 0.1 in magnitude.
 
 **The normaliser travels inside the checkpoint.** A policy restored without its observation
 statistics sees a completely different input distribution and behaves like an untrained
-network — a failure that looks like the training run was worthless. Saving them together makes
+network, a failure that looks like the training run was worthless. Saving them together makes
 that impossible, and a mismatched-dimension load is refused rather than silently reinterpreted.
 
 **Returns are scaled, never shifted.** Subtracting a constant from every reward changes the
@@ -545,27 +545,27 @@ round-trip weights, statistics, optimiser state and provenance.
 which is what most reference implementations do. That is not harmless. The parallel-variance
 update carries a `delta² · (n_a·n_b/total)` term, and when the data sits far from zero that
 delta is the full offset. A stream centred on 1e6 with a spread of 1e-2 reported a variance of
-about **250** instead of 1e-4 — every observation would then have been scaled to nothing. The
+about **250** instead of 1e-4, and every observation would then have been scaled to nothing. The
 first batch now defines the statistics outright, and the test asserts the variance is under 1.0
 rather than merely close to the right value, so the failure mode cannot creep back.
 
 ### Next
 
-M5 — PPO on top of this, and finding out whether the humanoid learns to stand.
+M5: PPO on top of this, and finding out whether the humanoid learns to stand.
 
 ---
 
-## M5 — PPO, and the humanoid learns to stand
+## M5: PPO, and the humanoid learns to stand
 
 **Status:** done (2026-09-08). **The exit criterion was met.**
 
 ### Implemented
 
-- **`python/rl/rollout.py`** — fixed (steps x environments) storage and GAE.
-- **`python/rl/ppo.py`** — clipped surrogate, value loss, entropy bonus, gradient clipping,
+- **`python/rl/rollout.py`**: fixed (steps x environments) storage and GAE.
+- **`python/rl/ppo.py`**: clipped surrogate, value loss, entropy bonus, gradient clipping,
   advantage normalisation, and a target-KL early stop using Schulman's low-variance estimator.
-- **`python/train.py`** — the training loop, TensorBoard logging, checkpointing.
-- **`python/test.py`** — playback of a checkpoint with no backpropagation and the normaliser
+- **`python/train.py`**: the training loop, TensorBoard logging, checkpointing.
+- **`python/test.py`**: playback of a checkpoint with no backpropagation and the normaliser
   frozen.
 - **`scripts/train.ps1`**, **`scripts/evaluate.ps1`**; `aibf_env --capture` gained a frame strip.
 
@@ -574,7 +574,7 @@ M5 — PPO on top of this, and finding out whether the humanoid learns to stand.
 `configs/ppo_stand.json`, 32 environments, 6.0M environment steps in **13.7 minutes** at
 ~7 800 steps/s end to end.
 
-Evaluated afterwards with `test.py` — deterministic actions, frozen normaliser, 40 episodes:
+Evaluated afterwards with `test.py`: deterministic actions, frozen normaliser, 40 episodes:
 
 | | |
 |---|---|
@@ -585,7 +585,7 @@ Evaluated afterwards with `test.py` — deterministic actions, frozen normaliser
 | Foot contacts in every captured frame | 2 |
 
 A random policy survives 60 steps. This one survives all 1000, every time, with a return
-spread of 8 points out of 4418 — **0.2%** — from randomised initial states. Converging to the
+spread of 8 points out of 4418, **0.2%**, from randomised initial states. Converging to the
 same outcome from different starts is what makes this balance rather than a memorised pose.
 
 Reward components, first update against the mean of the last twenty:
@@ -603,12 +603,12 @@ Reward components, first update against the mean of the last twenty:
 | `horizontal_drift_cost` | 0.558 | 0.061 | −0.496 |
 | `torque_cost` | 0.441 | 0.138 | −0.303 |
 | `action_cost` | 0.308 | 0.268 | −0.040 |
-| `joint_limit_cost` | 0.000 | 0.000 | — |
+| `joint_limit_cost` | 0.000 | 0.000 | n/a |
 
 Every single component moved the right way. That matters more than the scalar return: a policy
 that had found an exploit would show one term saturating while the others flatlined, and the
 per-component logging exists specifically to make that visible. It is not what happened.
-`torque_cost` **falling** to 0.138 is the clearest sign — the final policy stands using less
+`torque_cost` **falling** to 0.138 is the clearest sign: the final policy stands using less
 effort than the flailing one it started from, which is what an actual balance strategy looks
 like rather than a stiff brace.
 
@@ -631,7 +631,7 @@ Worth saying plainly, because the numbers alone would oversell it.
 - **Explained variance ends at −0.67**, which looks alarming. The reading is that it becomes
   meaningless once the task is solved: within a single 2048-sample rollout every episode now
   returns within 0.2% of every other, so the variance the metric divides by collapses to noise.
-  This is supported by the trace — EV was a healthy +0.87 early, when returns genuinely varied,
+  This is supported by the trace: EV was a healthy +0.87 early, when returns genuinely varied,
   and degraded as the policy converged. That is an inference from the logs rather than something
   isolated with a controlled experiment, and it is the one number in this milestone not
   independently confirmed.
@@ -650,7 +650,7 @@ return respectively.
 
 One test earns its keep more than the rest: `test_the_first_minibatch_starts_at_a_ratio_of_one`.
 If `act` and `evaluate_actions` ever disagree about a log-probability, the PPO ratio starts away
-from 1 and every update is wrong — while still training, just badly.
+from 1 and every update is wrong, while still training, just badly.
 
 `test_ppo_can_solve_a_trivial_bandit` closes the loop end to end: a one-step problem where
 reward is −(a − target)², which converges only if every sign in the objective is right.
@@ -671,13 +671,13 @@ backwards, so the corrected expectation is now spelled out in the test.
 
 ### Next
 
-M6 — robustness: random shoves during training (`configs/env2d_robust.json`), wider reset noise,
+M6 is robustness: random shoves during training (`configs/env2d_robust.json`), wider reset noise,
 and an interactive mode for pushing the figure and throwing things at it. The bar is recovering
 from disturbances it never saw individually.
 
 ---
 
-## M6 — recovering from being shoved
+## M6: recovering from being shoved
 
 **Status:** done (2026-09-08). **The exit criterion was met, including generalisation beyond
 the training range.**
@@ -687,7 +687,7 @@ the training range.**
 The environment gained a *deterministic* disturbance schedule alongside the random one used for
 training: `interval_steps` fires an impulse exactly every N control steps with alternating side.
 Random shoves are right for training, because a policy must not be able to brace on a timer, but
-they make a terrible measurement — the survival rate would depend on how many shoves happened to
+they make a terrible measurement: the survival rate would depend on how many shoves happened to
 land. `python/push_test.py` sweeps the magnitude under the fixed schedule and can run two
 checkpoints through an identical one.
 
@@ -705,7 +705,7 @@ what "it stands perfectly" is worth:
 
 **40 N·s is exactly where the pose-holding controller from M1 fell over.** Six million steps of
 training to stand perfectly bought essentially no ability to recover. It found a stable fixed
-point, not a strategy — which is why this is a separate milestone rather than a footnote to M5.
+point, not a strategy, which is why this is a separate milestone rather than a footnote to M5.
 
 ### The result
 
@@ -726,13 +726,13 @@ noise. 10M environment steps, ~21 minutes, best mean return +4129.
 The survival threshold moved from 40 N·s to 130 N·s, with a clean cliff at 160.
 
 **The generalisation is the part that matters.** Training used 12–95 N·s. The policy survives
-100 and 130 N·s at a 100% rate — impulses half again as large as anything it ever saw. That is
+100 and 130 N·s at a 100% rate, impulses half again as large as anything it ever saw. That is
 the exit criterion: recovering from disturbances it was never trained on individually, rather
 than memorising the ones it was.
 
 Recovery from a 55 N·s shove, captured frame by frame: the pelvis dips 19 mm (1.009 → 0.990 m)
 and is back to 1.006 m within 0.3 s, with both feet in contact throughout. At that magnitude the
-recovery is almost invisible, which is itself the finding — a shove that reliably felled the
+recovery is almost invisible, which is itself the finding: a shove that reliably felled the
 standing policy no longer registers.
 
 ### Also added
@@ -743,7 +743,7 @@ trainer is stepping, so what is being poked is the same simulation being learned
 
 ### Known issues
 
-- The 160 N·s failure is total rather than graceful — 0%, not a gradual decline. Whether that is
+- The 160 N·s failure is total rather than graceful: 0%, not a gradual decline. Whether that is
   a genuine physical limit or the edge of what the training distribution supports has not been
   separated.
 - The robust policy was not re-checked against the *undisturbed* standing task beyond the 0 N·s
@@ -753,25 +753,25 @@ trainer is stepping, so what is being poked is the same simulation being learned
 
 ### Next
 
-M7 — train the imitation stack, starting with arm-raise and squat, before anything acrobatic.
+M7: train the imitation stack, starting with arm-raise and squat, before anything acrobatic.
 
 ---
 
-## M7 — imitation learning
+## M7: imitation learning
 
 **Status:** in progress. Squat trained and verified; arm-raise, jump and backflip training.
 
 ### Built
 
-- **`Motion2D`** — keyframe clips, cubic Hermite interpolation, JSON. Root angle stored
+- **`Motion2D`**: keyframe clips, cubic Hermite interpolation, JSON. Root angle stored
   unwrapped so a flip can say "-6.28 radians" and mean one revolution.
-- **Five DeepMimic-style tracking terms** — pose, joint velocity, end effector, root, centre of
+- **Five DeepMimic-style tracking terms**: pose, joint velocity, end effector, root, centre of
   mass. Each an exponential of a squared error.
-- **Reference State Initialization** — episodes start at a random phase with the velocities
+- **Reference State Initialization**: episodes start at a random phase with the velocities
   belonging to it.
-- **`aibf_animator`** — timeline, keyframing, onion skin, `g` to drop a pose onto the floor,
+- **`aibf_animator`**: timeline, keyframing, onion skin, `g` to drop a pose onto the floor,
   `p` for a physics preview.
-- **`aibf_motions`** — generates starter clips with ground-contact heights solved by FK.
+- **`aibf_motions`**: generates starter clips with ground-contact heights solved by FK.
 
 ### The squat policy was cheating, and the logs said so
 
@@ -784,7 +784,7 @@ episode never ended; `root_match` did flag it at 0.368, but at weight 0.15 again
 at 0.65 it was cheaper to ignore than to fix.
 
 The fix is a termination, not a weight. `early_termination_root_error` ends an episode once the
-root has drifted from the reference in height or orientation — nothing else distinguishes
+root has drifted from the reference in height or orientation. Nothing else distinguishes
 "squatting" from "lying down making squat-shaped motions". The weight went 0.15 → 0.5 as well.
 
 After the fix:
@@ -799,7 +799,7 @@ After the fix:
 
 `pose_match` **falling** is the honest direction. The 0.855 was earned by a policy on the
 ground; 0.580 is what tracking looks like while actually upright. Rendered and inspected: a real
-squat — torso forward, knees bent, both feet planted, arms out as counterbalance, pelvis cycling
+squat: torso forward, knees bent, both feet planted, arms out as counterbalance, pelvis cycling
 1.007 → 0.718 → 1.007.
 
 ### Two reward terms were dead
@@ -807,7 +807,7 @@ squat — torso forward, knees bent, both feet planted, arms out as counterbalan
 `joint_velocity_match` read exactly **0.000** for a policy visibly performing the motion, and
 `end_effector_match` sat at 0.23. Both scales came from DeepMimic and are wrong for this figure.
 A term pinned against an end of its range contributes no gradient at all, so it is not a weak
-signal — it is no signal. Retuned (`joint_velocity` 0.1 → 0.01, `end_effector` 40 → 15) to put a
+signal. It is no signal. Retuned (`joint_velocity` 0.1 → 0.01, `end_effector` 40 → 15) to put a
 working policy mid-range with room to improve.
 
 ### The damping ceiling
@@ -824,15 +824,15 @@ ran, and the symptom would have looked like a learning failure.
 | 30 | 0.98 | 0.94 | 0.87 | 0.79 |
 | **50 (imitation)** | **1.00** | **0.99** | **0.97** | **0.94** |
 
-No instability or velocity clamping at any setting. With `kp/50`, the pure PD preview — no
-learning at all — leaves the ground and completes most of a backflip, pelvis reaching 1.79 m
+No instability or velocity clamping at any setting. With `kp/50`, the pure PD preview, with no
+learning at all, leaves the ground and completes most of a backflip, pelvis reaching 1.79 m
 where it previously ended face-down at 0.11. That establishes the reference is feasible, which
 is the question the preview exists to answer.
 
 ### Throughput, and a correction
 
 An earlier reading of the profile was wrong. Comparing a random-action agent (34k steps/s) to
-training (10k) and blaming the update ignored that the random agent runs no policy — the network
+training (10k) and blaming the update ignored that the random agent runs no policy: the network
 forward pass happens **inside** the rollout. The instrumented split is `sim 0.15s + learn 0.03s`:
 simulation is ~80% of wall time, not 20%.
 
@@ -856,7 +856,7 @@ The machine has 32 logical cores, so motions now train concurrently rather than 
 
 ---
 
-## M8 — the backflip
+## M8: the backflip
 
 **Status:** the backflip works. Jump and forward roll are being retrained after the jump failed
 in an instructive way.
@@ -866,7 +866,7 @@ in an instructive way.
 12M environment steps, ~19 minutes, trained concurrently with two other motions.
 
 A still frame cannot distinguish a backflip from a tuck-and-untuck, and `sin`/`cos` of the
-pelvis angle cannot either — both are periodic. So the pelvis angle is *unwrapped* across the
+pelvis angle cannot either, since both are periodic. So the pelvis angle is *unwrapped* across the
 episode and accumulated:
 
 | step | pelvis / rest | accumulated rotation | feet down |
@@ -891,7 +891,7 @@ the pelvis, landing on both feet.
 
 **It is not closely imitating the reference, and that distinction matters.** `pose_match` is
 0.117 and `end_effector_match` 0.113, against `root_match` 0.729 and `com_match` 0.970. The
-policy matched the *trajectory* the reference describes — crouch, launch, invert, rotate, land —
+policy matched the *trajectory* the reference describes (crouch, launch, invert, rotate, land)
 and found its own limb configuration to do it with rather than copying the authored arm and leg
 angles. That is a physically simulated backflip; it is not "tracks the reference closely".
 
@@ -910,7 +910,7 @@ Two things hid it:
    concentrated in a short window disappears into the mean. `root_match` 0.890 corresponds to an
    average height error of 7.6 cm while the peak is missed by 26 cm.
 2. **The termination was too loose.** At a 0.45 m root threshold, never leaving the ground never
-   terminates — so nothing pressured the policy to jump.
+   terminates, so nothing pressured the policy to jump.
 
 The backflip escaped both because **a 360° rotation cannot be faked by standing still**. The
 motion is self-verifying in a way the jump is not.
@@ -934,7 +934,7 @@ Threshold 0.45 → 0.15, nothing else changed:
 |---|---|---|
 | Crouch depth | 1.016 (barely) | **0.784** |
 | Peak pelvis | 1.069 | **1.368** (reference asks 1.33) |
-| Airborne | never — feet down at peak | **25+ steps clear of the ground** |
+| Airborne | never, feet down at peak | **25+ steps clear of the ground** |
 | `root_match` | 0.890 | 0.955 |
 
 Rendered and inspected: unambiguously airborne, both feet well clear, body extended. A single
@@ -943,7 +943,7 @@ termination threshold was the whole difference between a gesture and a jump.
 ### The forward roll
 
 24/24 episodes complete the clip. Accumulated rotation **−360°** across 16 episodes
-(range −356 to −365) — negative being forward for a figure facing +X, the mirror of the
+(range −356 to −365), negative being forward for a figure facing +X, the mirror of the
 backflip's +360°. Rendered mid-roll: head down near the ground, body rotating over the top.
 
 The pelvis trace tells the same story: 1.020 standing → 0.245 inverted → 0.757 recovering.
@@ -961,14 +961,14 @@ The pelvis trace tells the same story: 1.020 standing → 0.245 inverted → 0.7
 ### Not attempted
 
 A **cartwheel** is a frontal-plane motion. A sagittal 2D figure has no frontal plane, so it
-cannot be represented here at all — it is not a hard case, it is an impossible one. It waits for
+cannot be represented here at all: it is not a hard case, it is an impossible one. It waits for
 the 3D humanoid.
 
 ### Honest limits on all of this
 
 - **Tracking is loose on the acrobatic motions.** `pose_match` runs 0.08–0.20 for jump, roll and
-  backflip against 0.86 for arm raise. The policies match the *trajectory* — the root's path
-  through space — and improvise the limbs. Whether tighter tracking needs more training, gentler
+  backflip against 0.86 for arm raise. The policies match the *trajectory*, the root's path
+  through space, and improvise the limbs. Whether tighter tracking needs more training, gentler
   falloffs, or a more physically achievable reference has not been separated.
 - Every "N/N" figure above comes from a deterministic policy. Stochastic sampling was not swept.
 - The verification scripts written for this were throwaway and one had a sign bug: the rotation
@@ -977,7 +977,7 @@ the 3D humanoid.
 
 ---
 
-## M8b — mid-air disturbance, and a measurement that measured nothing
+## M8b: mid-air disturbance, and a measurement that measured nothing
 
 The question this milestone exists to answer is the one anybody asks after seeing the backflip:
 if you shove it mid-flip, does it recover?
@@ -986,7 +986,7 @@ if you shove it mid-flip, does it recover?
 
 The initial sweep reported an identical 23/24 completion rate at **every** magnitude from 0 to
 180 N·s. Read one way that is a policy so robust the disturbance is beneath its notice. Read
-correctly it is a sweep that never varied its own independent variable — the magnitude column
+correctly it is a sweep that never varied its own independent variable: the magnitude column
 was decoration.
 
 Two things were wrong, and only one of them was the one first blamed.
@@ -994,7 +994,7 @@ Two things were wrong, and only one of them was the one first blamed.
 **The wrong diagnosis.** The impulse was applied at the pelvis's centre of mass, and the first
 explanation was that a centred impulse carries no angular part, so a free-flying figure cannot
 be rotated by it. That is true of a *single rigid body* and false of this figure. The pelvis is
-not the system's centre of mass — the chest, arms and head sit above it — so within one solver
+not the system's centre of mass (the chest, arms and head sit above it), so within one solver
 step the joints transmit the impulse and the whole figure turns about the true centre of mass.
 Measured: a 40 N·s centred shove produces 0.09 rad/s of peak spin, against 0.40 rad/s for the
 same shove applied 0.3 m off centre. The offset is worth about 4× the rotation per unit of
@@ -1004,7 +1004,7 @@ That correction is now pinned by `Env.aCentredImpulseImpartsNoAngularVelocityAtT
 whose name says exactly how far the claim goes.
 
 **The actual cause.** The sweep's generated config contained only `max_episode_steps` and a
-`disturbance` block — written standalone rather than merged onto `env2d_backflip.json`. So the
+`disturbance` block, written standalone rather than merged onto `env2d_backflip.json`. So the
 simulator ran with no imitation section, no motion clip, and the standing motor gains. The
 figure under test was not the one the checkpoint was trained for, and the "survival rate" was
 counting episodes that ran to a time limit while doing nothing in particular.
@@ -1016,13 +1016,13 @@ carries a **witness**: the jump in angular velocity across the single step the s
 If that column is flat across the sweep, the script prints a warning instead of a result.
 
 The witness is deliberately not "peak angular velocity over the episode". A backflip spins at
-several rad/s under its own power, so a peak reads the same with or without a disturbance — it
+several rad/s under its own power, so a peak reads the same with or without a disturbance, and it
 would have certified the broken sweep as a working one.
 
 Two other things had to change to make the question answerable at all:
 
-- **`disturbance.offset_max`** — where the impulse lands, so it carries torque.
-- **`disturbance.at_step`** — one shove at a chosen instant, instead of a repeating beat. With a
+- **`disturbance.offset_max`**: where the impulse lands, so it carries torque.
+- **`disturbance.at_step`**: one shove at a chosen instant, instead of a repeating beat. With a
   repeating schedule the second shove arrives after the figure has landed, and the result stops
   being a statement about mid-air recovery.
 
@@ -1058,7 +1058,7 @@ Same 200 N·s shove, swept across the moment it arrives:
 | 55 | 83% | 351° |
 | 65 | 54% | 348° |
 
-Step 15 is before takeoff. Hit there, the flip never happens — 51° of rotation is a stumble, not
+Step 15 is before takeoff. Hit there, the flip never happens: 51° of rotation is a stumble, not
 an aborted flip. This is the honest shape of the result: the policy is robust *in the air*, where
 it has already committed its angular momentum, and fragile during the launch, where it is still
 a standing figure trying to jump. Which is roughly true of a human gymnast.
@@ -1120,7 +1120,7 @@ the policy could survive.
 `imit_backflip_robust` finished having written only a `_latest` checkpoint. No `_best`.
 
 Resuming restored `meta.best_return` along with the weights, so the fine-tune inherited the
-undisturbed run's +42.70 watermark and then spent 10M steps between +26 and +32 — because the
+undisturbed run's +42.70 watermark and then spent 10M steps between +26 and +32, because the
 disturbed task genuinely pays less. The save condition never fired once.
 
 Returns are only comparable within one task, so the watermark is meaningless the moment the

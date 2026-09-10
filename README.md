@@ -15,8 +15,8 @@ and a hand-written rigid-body solver does the rest.
 
 ```
 12,317 lines of C++      rigid-body physics, constraint solver, humanoid, OpenGL renderer
- 4,223 lines of Python   PPO, GAE, policy, normalisation, evaluation harnesses
-   310 tests             216 C++, 94 Python, all green
+ 4,375 lines of Python   PPO, GAE, policy, normalisation, evaluation harnesses
+   313 tests             216 C++, 97 Python, all green
      2 dependencies      GLFW for the window, PyTorch for autograd. Nothing else is vendored.
 ```
 
@@ -245,7 +245,7 @@ by rendering the frames and looking at them.
 
 ```powershell
 .\scripts\build.ps1                 # Release into build\bin\Release
-.\scripts\test.ps1                  # 216 C++ cases and 94 Python cases
+.\scripts\test.ps1                  # 216 C++ cases and 97 Python cases
 ```
 
 ---

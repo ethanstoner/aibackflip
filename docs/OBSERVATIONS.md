@@ -55,10 +55,11 @@ their spread depends on the task rather than the body, and the running mean/std 
 Python handles them. Arbitrary constants like "÷ 10" are deliberately absent: they would be
 guesses with no physical meaning, and the running normaliser does the job properly.
 
-**Phase is reserved.** It stays 0 until imitation learning lands in M7. It is in the layout from
-the start so the observation size does not change under the policy later.
+**Phase was reserved before it was used.** It stayed 0 until imitation landed in M7, but it was in
+the layout from the start so the observation size would not change under the policy later. On a
+non-imitation task it is still 0.
 
-## Reward terms: 13 values
+## Reward terms: 18 values
 
 The simulator computes raw, unweighted terms; Python applies the weights and sums them
 (`python/communication/vec_env.py`). Weights become a config change rather than a rebuild, and
@@ -84,9 +85,21 @@ or bad.
 | 10 | `action_cost` | [0, 1] | mean squared normalized action |
 | 11 | `torque_cost` | [0, 1] | mean \|torque\| ÷ maxTorque across joints |
 | 12 | `joint_limit_cost` | ≥ 0 | worst limit violation (radians) |
+| 13 | `pose_match` | (0, 1] | exp(−k·Σⱼ eⱼ²), eⱼ = wrapped joint angle error (rad) |
+| 14 | `joint_velocity_match` | (0, 1] | exp(−k·Σⱼ eⱼ²), eⱼ = joint rate error (rad/s) |
+| 15 | `end_effector_match` | (0, 1] | exp(−k·Σₑ ‖eₑ‖²), hands and feet **relative to the root** (m) |
+| 16 | `root_match` | (0, 1] | exp(−k·(Δh² + w·Δθ²)), pelvis height and angle |
+| 17 | `com_match` | (0, 1] | exp(−k·‖e‖²), centre of mass relative to the root (m) |
 
 `uprightness` compares each link against **its own rest orientation**, so a foot, which rests
 horizontal, is not permanently scored as fallen over.
+
+The five imitation terms read exactly zero without a reference motion, and the falloff rates `k`
+come from the environment config's `imitation.scales` rather than being fixed here. Each error is
+a **sum** over joints or effectors, not a mean, which matters when reading a term back as a
+physical quantity: with `pose = 2.0`, a `pose_match` of 0.20 is Σe² = 0.80 rad², or 0.26 rad of
+RMS error per joint across twelve joints. `python/track_test.py` does that inversion and reports
+the per-joint breakdown the aggregate hides.
 
 Starting weights for the standing task live in `RewardWeights.standing()`. They are a starting
 point, not a tuned result; the per-component logs exist precisely so they can be argued with

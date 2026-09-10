@@ -256,9 +256,15 @@ Reproduce the headline measurements:
 python python\flight_test.py --model checkpoints\imit_backflip_best.pt `
                              --magnitudes 0 100 200 300 400 --offset 0.4
 python python\push_test.py   --model checkpoints\robust_v1_best.pt
+python python\track_test.py  --model checkpoints\k025_gentle_best.pt `
+                             --config configs\env2d_backflip_capture.json
 ```
 
-Train the backflip from scratch (12M environment steps, about 45k steps/s with 64 environments):
+Train the backflip from scratch. 12M environment steps at 11.4k to 12.5k env-steps/s with 64
+environments, so about 17 minutes end to end, measured over the two full runs in M11. The bare
+simulator benchmarks at 38k to 46k (`aibf_diag throughput`) and that number is not this one: it
+excludes the bridge, the observation, the reward terms, resets and the policy. Roughly three
+quarters of a training step is the parts the benchmark leaves out.
 
 ```powershell
 .\scripts\train.ps1 -Config configs\ppo_imitate_fast.json `

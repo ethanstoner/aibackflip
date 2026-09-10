@@ -1629,3 +1629,21 @@ agreeing to three decimals, and 100% / +358° / 1.66× / 0.71 s with a spin-kick
 witness of 6.093 on both. That is independent confirmation that the loop-point
 fix did not touch the backflip, which the code path said and which is now
 measured rather than reasoned.
+
+### A throughput number that was measuring something else
+
+The README said the backflip trains at "about 45k steps/s with 64
+environments". Two full 12M-step runs measure 11.4k to 12.5k. The 45k came
+from `aibf_diag throughput`, which is a bare-physics benchmark: one humanoid per
+world, stepped in a loop, with no bridge, no observation, no reward terms, no
+resets and no policy. Re-run now it gives 46,280 env-steps/s at one world and
+38,358 at 32.
+
+Both numbers are correct and only one of them answers "how long does this take
+to train". Roughly three quarters of a training step is the parts the benchmark
+excludes — the per-step log reads `sim 0.29s + learn 0.08s` for 4096 steps, and
+even that "sim" figure is 14.1k env-steps/s rather than 38k, because it is
+timing the round trip through the bridge and not the solver.
+
+Corrected to the measured rate, with the benchmark quoted next to it and
+labelled as what it is.

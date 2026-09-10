@@ -97,9 +97,10 @@ solver rather than Baumgarte stabilisation. Capsule bodies, capsule-vs-halfspace
 capsule-vs-capsule narrow phase, collision groups, semi-implicit Euler integration.
 
 Verified numerically, not by eye. Joint anchor drift on a five-link chain yanked for six seconds
-is **1.8 mm** worst case. Energy is monotonically non-increasing over a 240-second horizon: the
-solver only ever loses energy, never gains it, which is the property that separates a stable
-solver from one that quietly explodes.
+is **1.8 mm** worst case. Energy is monotonically non-increasing at every horizon measured, out
+to 60 seconds and −16% by then: the solver only ever loses energy, never gains it, which is the
+property that separates a stable solver from one that quietly explodes. The sign is the claim
+here and the magnitude is not; one second of backflip does not care about a sixty-second figure.
 
 ### The humanoid
 

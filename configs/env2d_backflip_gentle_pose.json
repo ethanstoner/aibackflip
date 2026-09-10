@@ -1,0 +1,76 @@
+// env2d_backflip.json with one change: the pose falloff, 2.0 -> 0.25.
+//
+// M11 measured where the pose term actually is during a trained backflip. It
+// reads 0.13 in aggregate, and the aggregate hides the shape: the policy tracks
+// at 0.19 to 0.28 rad of joint error near both ends of the clip and 0.55 to
+// 0.63 rad through the middle. At k = 2.0 those middle phases score pose_match
+// between 1e-4 and 3e-3, where the exponential is flat and has roughly 2000x
+// less gradient than at a healthy error. The term is dead over about 60% of the
+// clip - exactly the part where the flip is won.
+//
+// k = 0.25 puts the *currently achieved* error in the middle of the term's
+// range rather than pinned against the bottom of it:
+//
+//   phase band      joint rms     pose_match @ 2.0     pose_match @ 0.25
+//   ends            0.19-0.28     0.25 - 0.49          0.79 - 0.86
+//   middle          0.55-0.63     0.001 - 0.005        0.30 - 0.41
+//
+// This is a hypothesis, not a fix. Retuning three dead terms on the 3D squat in
+// M10 made them readable and moved tracking by -7% to +11%, which is nothing:
+// a term having gradient and a policy learning from it are different claims.
+// The experiment is a training run against env2d_backflip.json under the same
+// seed and step budget, compared on both tracking *and* flip completion. The
+// term's mean rises from 0.13 to somewhere near 0.5 at a weight of 0.65, so
+// pose's share of the reward rises with it, and a policy that tracks better
+// while landing fewer flips is a real possible outcome rather than a failure of
+// the experiment.
+{
+  "max_episode_steps": 160,
+
+  "reset_noise": {
+    "root_angle": 0.05,
+    "root_height": 0.02,
+    "joint_angle": 0.06,
+    "linear_velocity": 0.0,
+    "angular_velocity": 0.0
+  },
+
+  // Unchanged from env2d_backflip.json. kd = kp/50 rather than the standing
+  // kp/10: tracking bandwidth is kp/kd, and the knee reaches 47% of a commanded
+  // 3 Hz swing at kp/10 against 97% at kp/50.
+  "humanoid": {
+    "joints": [
+      {"name": "waist",      "kd": 80},
+      {"name": "neck",       "kd": 8},
+      {"name": "shoulder_l", "kd": 16},
+      {"name": "elbow_l",    "kd": 10},
+      {"name": "shoulder_r", "kd": 16},
+      {"name": "elbow_r",    "kd": 10},
+      {"name": "hip_l",      "kd": 80},
+      {"name": "knee_l",     "kd": 60},
+      {"name": "ankle_l",    "kd": 30},
+      {"name": "hip_r",      "kd": 80},
+      {"name": "knee_r",     "kd": 60},
+      {"name": "ankle_r",    "kd": 30}
+    ]
+  },
+
+  "imitation": {
+    "motion": "motions/backflip.json",
+    "enabled": true,
+    "reference_state_init": true,
+
+    "early_termination_pose_error": 1,
+    "early_termination_root_error": 0.6,
+    "end_episode_at_motion_end": true,
+
+    "scales": {
+      "pose": 0.25,
+      "joint_velocity": 0.01,
+      "end_effector": 15.0,
+      "root": 20.0,
+      "com": 10.0,
+      "root_angle_weight": 0.5
+    }
+  }
+}

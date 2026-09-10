@@ -1684,3 +1684,84 @@ last segment.
 under one config. Reading two policies against their own training returns is
 the mistake it exists to prevent, and the falloff experiment above is the
 demonstration: +62.78 against +42.70, almost entirely a change of scale.
+
+### Rechecking for the same mistakes elsewhere
+
+The two bugs `track_test.py` found were of a kind, so the rest of the project was
+searched for that kind rather than read start to finish. Four classes, and every
+one of them had another instance.
+
+**A number quoted from a different measurement than the one it names.** After the
+training rate that was really the bare simulator's benchmark, the README also
+claimed energy is non-increasing "over a 240-second horizon". Nothing measures
+240 seconds; `aibf_diag` stops at 60, which is what this log recorded at the
+time, and 240 is the physics timestep denominator.
+
+**Reading the state after the reset.** `flight_test.py` — the script that
+produces every headline number — took peak height and the foot contact flags
+from the live observation, which after an auto-reset already belongs to the next
+episode. Height survived it, because a reset pose is shorter than a flip apex
+and the statistic is a running maximum. Contacts did not: a reset pose has both
+feet down, so the last airborne step of every episode was counted as grounded.
+
+Measured with one line changed and nothing else: the jump's airborne time goes
+from 0.43 s to 0.44 s, with peak height 1.27× and spin kick 3.911 identical
+either side. The backflip and roll do not move, because they land before their
+clip ends and their final step is genuinely grounded — which is why this
+survived. The defect can only bite an episode that ends in the air, and the one
+motion that does is the one nobody was watching.
+
+**An assumption with no witness.** Rotation is integrated by differencing an
+orientation that travels as sin and cos, so each step's turn is recoverable only
+up to a multiple of 2π and the shortest arc is taken. Past π in one control step
+that silently drops a whole revolution, and the rotation column reads *low* while
+looking perfectly normal. `flight_test.py` now reports the largest single step
+next to the limit. It is 0.347 rad on an undisturbed backflip, 9× under π — and
+0.763 rad, only 4× under, at 400 N·s. The margin is real but it is not large,
+and it shrinks with exactly the variable the sweep varies.
+
+**A design principle the code did not follow.** The SPEC handshake exists so that
+Python never hardcodes a shape, and the README says so. `test.py` does it
+properly. `flight_test.py` and `track_test.py` used the literals 0, 1, 2, 5, 102,
+66, 90 and 109, with a comment conceding that resolving them would be better.
+Fine until a field is inserted, at which point both read somebody else's number
+with complete confidence and no error. Both resolve by name now, verified by
+re-running rather than by inspection — every number unchanged, so the indices
+were right and only fragile.
+
+In `track_test.py` it buys a real check rather than only robustness. The joint
+order lives in two places kept apart: the humanoid config, which is where the
+dumped clip's columns come from, and `jointShortName` in the observation. Every
+comparison in that script pairs them index by index. Looking each joint up by
+the clip's own name turns "these agree" into something that stops the run when
+it is false instead of grading the left knee against the right hip.
+
+### And every remaining claim, re-run
+
+| claim | result |
+|---|---|
+| joint anchor drift, 1.8 mm | 1.77 mm |
+| knee at 3 Hz, 47% standing gains vs 97% acrobatic | 0.47 and 0.97 |
+| 69 kg, 1.64 m | pinned by `HumanoidConfig.theFigureHasHumanProportions` |
+| standing, 39–40 of 40 over three seeds | 39, 40, 39; surviving returns spread 0.40% |
+| forward roll, −360°, 24/24 | −360°, 24/24 |
+| jump, peak 1.27× | 1.27× |
+| backflip sweep, 100/100/83/38/12% | identical |
+| **push recovery** | **wrong, see below** |
+
+Push recovery read "absorbs thirteen 115 N·s shoves per episode, falls at 145",
+and the command printed beside it produces **six** shoves. Thirteen needs
+`--interval 45`, which appears nowhere. Run that way:
+
+| impulse | survived |
+|---|---|
+| 100 N·s | 100% |
+| 115 N·s | 96% |
+| 130 N·s | 46% |
+| 145 N·s | 8% |
+
+So 115 is not "absorbs", 145 is not "falls", and 130 — a coin flip — was skipped
+entirely by a sentence that implied a clean threshold between the two numbers it
+did quote. Every rounding went the flattering way. That is the third claim this
+rule has cost its original wording, and the first found by re-running the whole
+table at once rather than by doubting one number.

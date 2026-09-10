@@ -80,7 +80,7 @@ committed alongside it. Nothing is claimed from watching the screen.
 | **Forward roll** | -360 deg, 24/24 episodes complete | `flight_test.py` |
 | **Jump** | peak height 1.27x rest, 0.44 s with both feet clear of the ground | `flight_test.py` |
 | **Standing** | 39 to 40 of 40 episodes reach the 1000-step limit across three seeds, surviving returns within 0.4% | `test.py` |
-| **Push recovery** | absorbs thirteen 115 N.s shoves per episode, falls at 145 | `push_test.py` |
+| **Push recovery** | thirteen shoves per episode, 0.8 s apart: 100% survive at 100 N.s, 96% at 115, 46% at 130, 8% at 145 | `push_test.py --interval 45` |
 
 The complete engineering log, including every experiment that failed and what each one turned
 out to be, is in [`docs/PROGRESS.md`](docs/PROGRESS.md).
@@ -226,6 +226,18 @@ episodes" turned out to be one seed of three, the other two giving 39/40. The ba
 time and peak height were a maximum over episodes reported as though it were a mean. Both are
 corrected above and the correction is recorded in `docs/PROGRESS.md`.
 
+Re-running every claim in this table in M11 cost a third. Push recovery read "absorbs thirteen
+115 N.s shoves per episode, falls at 145", and the `push_test.py` command printed next to it
+produces six shoves rather than thirteen — the thirteen needs `--interval 45`, which was not
+written down anywhere. Run properly, 115 N.s is 96% and not "absorbs", 145 N.s is 8% and not
+"falls", and 130 N.s is 46%, a coin flip the sentence skipped over entirely by implying a clean
+threshold between the two numbers it did quote. Every rounding went the flattering way. The row
+now states the curve and the command that draws it.
+
+The same pass confirmed the rest against fresh runs: 1.77 mm anchor drift, 47% against 97% knee
+bandwidth, 69 kg and 1.64 m, standing at 39/40/39 over three seeds, the roll's −360° at 24/24,
+and the backflip's whole disturbance sweep at 100/100/83/38/12%.
+
 Physics correctness is asserted numerically: impulse responses against closed-form results, joint
 anchor drift under load, energy behaviour, and finite-difference checks against the analytic
 formulas the solver uses. Every acrobatic result is confirmed twice, once by measurement and once
@@ -256,7 +268,8 @@ Reproduce the headline measurements:
 ```powershell
 python python\flight_test.py --model checkpoints\imit_backflip_best.pt `
                              --magnitudes 0 100 200 300 400 --offset 0.4
-python python\push_test.py   --model checkpoints\robust_v1_best.pt
+python python\push_test.py   --model checkpoints\robust_v1_best.pt `
+                             --interval 45 --magnitudes 100 115 130 145 160
 python python\track_test.py  --model checkpoints\k025_gentle_best.pt `
                              --config configs\env2d_backflip_capture.json
 ```

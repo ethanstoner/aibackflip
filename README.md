@@ -76,6 +76,7 @@ committed alongside it. Nothing is claimed from watching the screen.
 | **Backflip** | +358 deg mean rotation, 24/24 episodes complete, 0.71 s airborne, peak height 1.66x rest | `flight_test.py` |
 | **Backflip, shoved mid-flight** | lands 100% up to 100 N.s, 83% at 200 N.s, 38% at 300 N.s | `flight_test.py` |
 | **Backflip, trained against shoves** | 44% at 400 N.s against 12% untrained, costing 6 points at zero disturbance (96 episodes) | `flight_test.py` |
+| **Backflip, gentler pose falloff** | 0.340 rad mean joint error against 0.475, flip unchanged at 100% and +356 deg | `track_test.py` |
 | **Forward roll** | -360 deg, 24/24 episodes complete | `flight_test.py` |
 | **Jump** | peak height 1.27x rest, 0.43 s with both feet clear of the ground | `flight_test.py` |
 | **Standing** | 39 to 40 of 40 episodes reach the 1000-step limit across three seeds, surviving returns within 0.4% | `test.py` |
@@ -301,14 +302,15 @@ scripts/        build, test, train, evaluate, demo
   built and trained to stand, then removed: the acrobatics did not land in the time available and
   a half-finished second engine was worth less than a finished first one. That work and why it
   was cut is in `docs/PROGRESS.md`, and it is in the git history.
-- **Tracking is loose on the acrobatic motions,** and M11 separated why. It is not the motors:
-  every joint reaches two to ten times the peak rate its reference ever asks for, so the figure
-  is not lagging a clip it cannot follow. It is the falloff, and specifically mid-clip — each
-  motion tracks acceptably at both ends and collapses in the middle, where `pose_match` reads
-  1e-4 to 3e-3 and an exponential that saturated has about 2000× less gradient than a healthy
-  one. Whether a gentler falloff *improves* tracking rather than merely making it readable is a
-  separate claim, and an open one: the same retune on the 3D squat moved tracking by −7% to
-  +11%, which is nothing. `python python\track_test.py --model <ckpt>` reproduces the table.
+- **Tracking is loose on the acrobatic motions,** though M11 found most of a fix. It is not the
+  motors: every joint reaches two to ten times the peak rate its reference ever asks for, so the
+  figure is not lagging a clip it cannot follow. It is the falloff, and specifically mid-clip —
+  each motion tracks well at both ends and collapses in the middle, where `pose_match` reads
+  1e-4 to 3e-3 and a saturated exponential has about 2000× less gradient than a healthy one.
+  Retraining with the falloff at 0.25 instead of 2.0 cuts mean joint error from 0.475 rad to
+  0.340 (27° to 19°) at no measurable cost to the flip: 100% completion, +356° against +358°.
+  Still 19° per joint, so the policies continue to improvise the limbs; the jump and roll have
+  not been retrained. `python python\track_test.py --model <ckpt>` reproduces the table.
 - **The backflip is fragile at takeoff.** Shoved at 200 N.s during launch it completes 0% of
   flips, against 83% for the same shove at mid-flight. The robustness result is about the air,
   not the whole motion.

@@ -1564,3 +1564,68 @@ whether the current one has gradient, and the 3D squat in M10 is the warning:
 retuning made three dead terms readable there and moved tracking by −7% to +11%,
 which is nothing. Reading a term and learning from it are different properties.
 That experiment is next, and it is a training run, not an argument.
+
+### The experiment: a gentler falloff, trained rather than argued
+
+Two runs, same seed, same 12M steps, same everything but the pose falloff:
+`k200_base` at k = 2.0 and `k025_gentle` at k = 0.25. Both then graded under the
+**same** capture config at k = 2.0, so `pose_match` means the same thing for
+both regardless of what each was trained against, and mean joint error in
+radians is scale-free either way.
+
+Comparing returns would have been the mistake available here. `k025_gentle`
+finishes at +62.78 against +42.70, and almost all of that is the term reading
+higher on a different scale — the same illusion that made the M10 3D squat's
+return rise from +234 to +343 while the policy bobbed 8 cm.
+
+| | k = 2.0 | k = 0.25 | |
+|---|---|---|---|
+| mean joint error | 0.475 rad (27.2°) | **0.340 rad (19.5°)** | −28% |
+| `pose_match` at k = 2.0 | 0.130 | **0.181** | +39% |
+| worst single joint | knee_l, 0.793 rad | knee_r, 0.451 rad | −43% |
+| largest joint's share of error | 23.2% | 14.7% | more evenly spread |
+
+And the phase profile, which is where the argument was:
+
+| phase | k = 2.0 | k = 0.25 |
+|---|---|---|
+| 0.0–0.2 | 0.240 rad | 0.267 rad |
+| 0.2–0.4 | 0.596 rad | 0.438 rad |
+| 0.4–0.6 | 0.447 rad | 0.318 rad |
+| 0.6–0.8 | 0.579 rad | 0.415 rad |
+| 0.8–1.0 | 0.421 rad | 0.206 rad |
+
+The dead middle is where it improved and the already-fine opening is very
+slightly worse, which is the shape the hypothesis predicted: a term with
+gradient in a region gets optimised there, and the total is finite.
+
+**The flip survives it.** This was the outcome that would have made the trade a
+bad one, and it did not happen.
+
+| impulse | k = 2.0 | k = 0.25 |
+|---|---|---|
+| 0 N·s | 100%, +358°, 1.66×, 0.71 s | 100%, +356°, 1.67×, 0.73 s |
+| 100 N·s | 100% | 96% |
+| 200 N·s | 79% | 83% |
+
+24 episodes per cell, so the 100 and 200 N·s differences are one episode each
+way and are not worth reading. The flagship checkpoint is still
+`imit_backflip_best`, because it is marginally ahead on the quantity the
+flagship is chosen for, and swapping it would mean re-rendering and re-verifying
+every measurement in the README to buy nothing.
+
+**This contradicts the M10 precedent, which is the point of having run it.**
+Retuning the 3D squat's dead terms made them readable and moved tracking by −7%
+to +11%. The same intervention here moved it by 28%. So "retuning a dead term
+does not help" was not a rule, it was one result: there the terms were dead *at
+initialization* and the policy had never had a gradient to follow, and here the
+term is dead only in the middle of the clip and alive at both ends, so there was
+a partly-trained policy for the restored gradient to improve.
+
+The control is also a reproducibility check that was not planned. `k200_base`
+was trained from scratch on the current tree and reproduces `imit_backflip_best`
+measurement for measurement — 0.475 rad mean error, all twelve per-joint values
+agreeing to three decimals, and 100% / +358° / 1.66× / 0.71 s with a spin-kick
+witness of 6.093 on both. That is independent confirmation that the loop-point
+fix did not touch the backflip, which the code path said and which is now
+measured rather than reasoned.

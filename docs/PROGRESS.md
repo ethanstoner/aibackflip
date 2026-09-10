@@ -1429,3 +1429,138 @@ The preview is open loop at the root. The pelvis is a free body, nothing in a
 clip controls its orientation, and holding fixed joint angles on an inverted
 pendulum means any lean grows. So the preview tests joint trackability and
 nothing else, and balance is exactly the part a policy supplies.
+
+
+---
+
+## M11: why the tracking is loose
+
+The open question the last README left was this. `pose_match` reads 0.86 for the
+arm raise and 0.08 to 0.20 for the jump, roll and backflip, and three
+explanations were live:
+
+* the acrobatic policies have not trained long enough,
+* the falloff rates are wrong, so the term is saturated and has no gradient,
+* the reference asks for something the figure physically cannot do.
+
+None of those can be told apart from one number covering twelve joints and a
+whole clip, and no instrument in the project could break it up. Building one is
+this milestone, and it turned out to find more on the way than at the end.
+
+### The instrument, and why it is allowed to be believed
+
+`track_test.py` reports per-joint and per-phase tracking error, and next to each
+joint the peak rate its reference ever demands against the peak rate the figure
+actually reached. It reads joint angles and phase out of the observation and the
+reference out of `aibf_motions --dump`, so every number in it is computed in
+Python from data the simulator sent.
+
+That is a problem, because the simulator computes `pose_match` from its own copy
+of both, and if Python samples the reference one control step out of step, or
+reads the wrong observation slice, the resulting table is *entirely plausible*.
+Believable errors on believable joints, describing nothing.
+
+So the script recomputes `pose_match` and `joint_velocity_match` from its own
+numbers and prints the disagreement against the simulator's. Above 0.02 it
+refuses to print the breakdown at all. That check found two bugs before it found
+any answers, and neither was findable any other way.
+
+### The reference velocity flipped sign once per loop
+
+The looping clips' reference velocity at the loop point was the exact negative of
+the velocity at phase 0. The arm came down at 3.71 rad/s, touched the bottom, and
+left going up at 3.71 rad/s in the same instant. Six joints of the squat did the
+same. The reference was demanding an infinite acceleration once per period, and
+Reference State Initialization was handing the figure those velocities whenever
+it picked a phase near the wrap.
+
+A looping clip is authored with the last keyframe repeating the first, so index 0
+and index n−1 are the same event written twice rather than two events one period
+apart. The finite-difference tangent read index 0's previous neighbour as index
+n−1 — itself — which makes a one-sided difference wearing the shape of a central
+one, and hands index n−1 the mirror image of it. The two ends of one instant then
+disagree in sign by construction.
+
+**Nothing on either side of the wire could have caught this.** The reward and the
+observation both read the reference from that sampler, so they agreed with each
+other perfectly at the broken value, and the physics was correct about a
+reference that was wrong. It took a third party recomputing the term from a
+dumped table to disagree — on 2 steps out of 2880.
+
+It also found a test agreeing with it. `trackingTermsFallAsTheFigureDriftsFromThe
+Reference` started at a random RSI phase, drifted 0.56 of a period and asserted
+the tracking reward had fallen. A start at phase 0.51 lands at phase 0.07, where
+the corrected reference is back at the rest pose and a figure holding the rest
+pose is *right* to score 0.97. Third time in this project a test has agreed with
+a defect instead of catching it.
+
+The consequences were measured rather than assumed. The jump, roll and backflip
+clips do not loop and take a code path the fix does not touch:
+`imit_backflip_best` re-measures at 100% of 24 flips, +358°, 1.66× peak height,
+0.71 s airborne — the previous numbers exactly. The arm raise and squat do loop,
+so their references genuinely changed and the old checkpoints now score against a
+clip they never saw.
+
+### Phase 1.0 and phase 0.0 are the same two floats
+
+The observation carries phase as sin and cos of phase × 2π, which keeps 0.99 and
+0.01 adjacent for a looping clip and is the right encoding. It also makes phase
+1.0 encode identically to phase 0.0, and for a one-shot clip those are different
+instants: the end of a backflip is not the beginning of one, and the reference
+velocity there is a different number.
+
+Reading the encoding alone therefore placed the final step of every episode at
+the start of the clip. Worst term gap 0.35, on 33 steps out of 2184 — and,
+again, nothing visible in the per-joint table, which looked entirely reasonable.
+Resolved from monotonicity: a one-shot clip's phase never runs backwards inside
+an episode, so a drop across one control step is the fold.
+
+### And then the answer
+
+With the instrument trustworthy — worst rebuilt-vs-reported gap 9.6e−6 on
+`pose_match` — all three acrobatic policies read the same way.
+
+| motion | `pose_match` | mean joint error | worst phase band |
+|---|---|---|---|
+| backflip | 0.130 | 0.475 rad (27°) | 0.6–0.7, at 0.0010 |
+| forward roll | 0.183 | 0.486 rad (28°) | 0.4–0.6, at 0.0001 |
+| jump | 0.033 | 0.502 rad (29°) | 0.2–0.4, at 0.0025 |
+
+**It is not the motors.** Every joint on every clip reaches far more than its
+reference ever asks for:
+
+| motion | joint | clip demands | figure reached |
+|---|---|---|---|
+| backflip | knee_l | 17.3 rad/s | 52.3 rad/s |
+| forward roll | knee_l | 5.8 rad/s | 59.8 rad/s |
+| jump | knee_r | 13.6 rad/s | 59.9 rad/s |
+
+The figure is not lagging a reference it cannot follow. It is moving two to ten
+times faster than the reference asks, in the wrong direction or at the wrong
+moment. The "physically untrackable clip" hypothesis is dead in its rate form,
+which is the form the earlier bandwidth work made plausible.
+
+**It is the falloff, and specifically it is the falloff mid-clip.** The error is
+not spread evenly across the motion. Every clip tracks acceptably at both ends
+and collapses in the middle, where `pose_match` reads 1e−4 to 3e−3. An
+exponential that low has no usable gradient: at Σe² ≈ 4.3 the derivative of
+exp(−2Σ) is about 2000× smaller than at Σe² ≈ 0.4. So over roughly 60% of each
+acrobatic clip the pose term contributes nothing to learning, while still
+appearing in the config, the logs and the total.
+
+That is the fourth instance of the dead-term bug in this project, and the first
+that is **localised in phase** rather than dead everywhere. The three before it
+were found by a term reading a suspicious constant. This one reads a healthy
+0.13 in aggregate and is dead exactly where the motion is hard.
+
+**Undertraining is not ruled out and is not the shape of this.** Undertraining
+would spread error across joints and phases. This error is structured by phase
+and identical in structure across three unrelated motions.
+
+### What is not yet answered
+
+Whether a gentler falloff actually *improves* tracking is a separate claim from
+whether the current one has gradient, and the 3D squat in M10 is the warning:
+retuning made three dead terms readable there and moved tracking by −7% to +11%,
+which is nothing. Reading a term and learning from it are different properties.
+That experiment is next, and it is a training run, not an argument.

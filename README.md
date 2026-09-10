@@ -14,9 +14,9 @@ and a hand-written rigid-body solver does the rest.
 | forward roll, -360 deg | vertical jump | recovering from a 135 N.s shove | hit with 300 N.s at the apex |
 
 ```
-12,054 lines of C++      rigid-body physics, constraint solver, humanoid, OpenGL renderer
- 3,478 lines of Python   PPO, GAE, policy, normalisation, evaluation harnesses
-   289 tests             212 C++, 77 Python, all green
+12,317 lines of C++      rigid-body physics, constraint solver, humanoid, OpenGL renderer
+ 4,223 lines of Python   PPO, GAE, policy, normalisation, evaluation harnesses
+   310 tests             216 C++, 94 Python, all green
      2 dependencies      GLFW for the window, PyTorch for autograd. Nothing else is vendored.
 ```
 
@@ -170,7 +170,7 @@ anything if the landing already works.
 
 ---
 
-## Four things that were harder than expected
+## Five things that were harder than expected
 
 **A reward term that flags a problem changes nothing. Only a termination does.** This happened
 three separate times. The squat policy lay on its back performing squat-shaped leg motions,
@@ -202,6 +202,18 @@ paying most of the cost, so there is no setting in between that avoids the trade
 checkpoints are kept, and the undisturbed one is the flip in the GIF at the top, because it is
 the better flip.
 
+**Two sides that agree can both be wrong.** The reference velocity of every looping clip flipped
+sign at the loop point: the arm came down at 3.71 rad/s, touched the bottom, and left going up at
+3.71 rad/s in the same instant. A looping clip repeats its first keyframe at the end, so index 0
+and index n−1 are the same event written twice, and the tangent code read index 0's previous
+neighbour as itself. No test could have caught it. The reward and the observation both read the
+reference from that one sampler, so they agreed with each other perfectly at the broken value and
+the physics was correct about a clip that was wrong. It took `track_test.py` recomputing the
+reward term from an independently dumped table to disagree — on 2 steps out of 2880. The same
+check immediately caught a second one: phase travels as sin and cos of phase × 2π, so phase 1.0
+and phase 0.0 are the same two floats, and the end of every episode was being read as the start
+of the clip.
+
 ---
 
 ## Verification
@@ -219,7 +231,7 @@ by rendering the frames and looking at them.
 
 ```powershell
 .\scripts\build.ps1                 # Release into build\bin\Release
-.\scripts\test.ps1                  # 212 C++ cases and 77 Python cases
+.\scripts\test.ps1                  # 216 C++ cases and 94 Python cases
 ```
 
 ---
@@ -273,7 +285,8 @@ cpp/motion      keyframe clips, Hermite interpolation, phase sampling
 cpp/engine      OpenGL 3.3 renderer with a hand-written 29-entry loader
 cpp/tools       env server, diagnostics, protocol fixture, motion generator
 python/rl       policy, PPO, GAE, running normalisation
-python/         train.py, test.py, push_test.py (standing), flight_test.py (airborne)
+python/         train.py, test.py, push_test.py (standing), flight_test.py (airborne),
+                track_test.py (per-joint imitation error), reference.py (clip reader)
 configs/        physics, body, task and hyperparameter configs
 motions/        five hand-authored reference clips
 scripts/        build, test, train, evaluate, demo
@@ -288,10 +301,14 @@ scripts/        build, test, train, evaluate, demo
   built and trained to stand, then removed: the acrobatics did not land in the time available and
   a half-finished second engine was worth less than a finished first one. That work and why it
   was cut is in `docs/PROGRESS.md`, and it is in the git history.
-- **Tracking is loose on the acrobatic motions.** `pose_match` runs 0.08 to 0.20 for the jump,
-  roll and backflip against 0.86 for an arm raise. The policies match the root trajectory and
-  improvise the limbs. Whether that needs more training, gentler falloffs or a more physically
-  achievable reference has not been separated.
+- **Tracking is loose on the acrobatic motions,** and M11 separated why. It is not the motors:
+  every joint reaches two to ten times the peak rate its reference ever asks for, so the figure
+  is not lagging a clip it cannot follow. It is the falloff, and specifically mid-clip — each
+  motion tracks acceptably at both ends and collapses in the middle, where `pose_match` reads
+  1e-4 to 3e-3 and an exponential that saturated has about 2000× less gradient than a healthy
+  one. Whether a gentler falloff *improves* tracking rather than merely making it readable is a
+  separate claim, and an open one: the same retune on the 3D squat moved tracking by −7% to
+  +11%, which is nothing. `python python\track_test.py --model <ckpt>` reproduces the table.
 - **The backflip is fragile at takeoff.** Shoved at 200 N.s during launch it completes 0% of
   flips, against 83% for the same shove at mid-flight. The robustness result is about the air,
   not the whole motion.

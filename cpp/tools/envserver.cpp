@@ -19,7 +19,6 @@
 
 #include "engine/DebugDraw.h"
 #include "engine/Renderer2D.h"
-#include "engine/Renderer3D.h"
 #include "engine/Window.h"
 #endif
 
@@ -32,11 +31,6 @@ struct Options {
     std::string configPath;
     std::string dumpConfigPath;
     bool render = false;
-    // Serves the 3D figure instead of the 2D one. Same protocol, same batch,
-    // same server: only the environment type differs, so Python needs no change
-    // beyond reading the dimensions out of the SPEC handshake, which it already
-    // does rather than hardcoding them.
-    bool threeD = false;
     int renderEnv = 0;
     int width = 1280;
     int height = 720;
@@ -99,7 +93,6 @@ bool parseOptions(int argc, char** argv, Options& out, bool& showHelp) {
             out.capturePath = argv[++i];
             out.render = true;
         }
-        else if (arg == "--3d") { out.threeD = true; }
         else if (arg == "--render-env") { nextInt(out.renderEnv); }
         else if (arg == "--width") { nextInt(out.width); }
         else if (arg == "--height") { nextInt(out.height); }
@@ -122,9 +115,8 @@ bool parseOptions(int argc, char** argv, Options& out, bool& showHelp) {
     return true;
 }
 
-template <typename Server>
-void printStatus(const Server& server, double elapsedSeconds, uint64_t stepsAtLastPrint) {
-    const auto& stats = server.stats();
+void printStatus(const net::EnvServer& server, double elapsedSeconds, uint64_t stepsAtLastPrint) {
+    const net::EnvServer::Stats& stats = server.stats();
     const double rate = elapsedSeconds > 0
                             ? double(stats.controlStepsServed - stepsAtLastPrint) / elapsedSeconds
                             : 0.0;
@@ -139,8 +131,7 @@ void printStatus(const Server& server, double elapsedSeconds, uint64_t stepsAtLa
     std::fflush(stdout);
 }
 
-template <typename Server>
-int runHeadless(Server& server, const Options& options) {
+int runHeadless(net::EnvServer& server, const Options& options) {
     std::printf("serving %d environments on %s:%u (session %u)\n", server.batch().size(),
                 options.server.bindAddress.c_str(), server.port(), server.session());
     std::printf("observation %d, action %d, reward terms %d\n", EnvBatch::observationDim(),
@@ -323,56 +314,6 @@ int runRendered(net::EnvServer& server, const Options& options) {
 
 }  // namespace
 
-// The 3D path. Headless only: the renderer is still 2D, so a 3D session is
-// trained and then inspected with the tools rather than watched live.
-#ifdef AIBF_WITH_RENDERER
-#include "tools/render3d.inl"
-#endif
-
-int run3D(const Options& options) {
-    EnvConfig3D config = EnvConfig3D::defaults();
-    if (!options.configPath.empty()) {
-        std::string error;
-        config = EnvConfig3D::loadFile(options.configPath, &error);
-        if (!error.empty()) {
-            std::fprintf(stderr, "config problem: %s\n", error.c_str());
-            return 2;
-        }
-    }
-    const std::string problem = config.validate();
-    if (!problem.empty()) {
-        std::fprintf(stderr, "invalid environment config: %s\n", problem.c_str());
-        return 2;
-    }
-
-    if (!options.dumpConfigPath.empty()) {
-        if (!config.toJson().writeFile(options.dumpConfigPath)) {
-            std::fprintf(stderr, "could not write %s\n", options.dumpConfigPath.c_str());
-            return 1;
-        }
-        std::printf("wrote %s\n", options.dumpConfigPath.c_str());
-        return 0;
-    }
-
-    net::EnvServer3D server;
-    if (!server.start(config, options.server)) {
-        std::fprintf(stderr, "could not start the server: %s\n", server.lastError().c_str());
-        return 1;
-    }
-
-#ifdef AIBF_WITH_RENDERER
-    // A capture request implies rendering, since there is nothing to screenshot
-    // otherwise.
-    if (options.render || !options.capturePath.empty()) return runRendered3D(server, options);
-#else
-    if (options.render) {
-        std::fprintf(stderr, "this build has no renderer; --render is unavailable\n");
-        return 2;
-    }
-#endif
-    return runHeadless(server, options);
-}
-
 int main(int argc, char** argv) {
     Options options;
     bool showHelp = false;
@@ -381,8 +322,6 @@ int main(int argc, char** argv) {
         printUsage();
         return 0;
     }
-
-    if (options.threeD) return run3D(options);
 
     EnvConfig config = EnvConfig::defaults();
     if (!options.configPath.empty()) {

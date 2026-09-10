@@ -56,9 +56,6 @@ add_library(aibf_physics STATIC
   cpp/physics/Collision2D.cpp
   cpp/physics/Joint2D.cpp
   cpp/physics/World2D.cpp
-  cpp/physics/Collision3D.cpp
-  cpp/physics/Joint3D.cpp
-  cpp/physics/World3D.cpp
 )
 target_link_libraries(aibf_physics PUBLIC aibf_core)
 
@@ -66,10 +63,6 @@ target_link_libraries(aibf_physics PUBLIC aibf_core)
 add_library(aibf_humanoid STATIC
   cpp/humanoid/HumanoidConfig.cpp
   cpp/humanoid/Humanoid2D.cpp
-  cpp/humanoid/HumanoidConfig3D.cpp
-  cpp/humanoid/Humanoid3D.cpp
-  cpp/humanoid/Observation3D.cpp
-  cpp/humanoid/RewardTerms3D.cpp
   cpp/humanoid/Observation.cpp
   cpp/humanoid/RewardTerms.cpp
 )
@@ -80,11 +73,11 @@ target_link_libraries(aibf_humanoid PUBLIC aibf_physics)
 # link GLFW or OpenGL at all.
 add_library(aibf_env_lib STATIC
   cpp/env/Env2D.cpp
-  cpp/env/Env3D.cpp
+  cpp/env/EnvBatch.cpp
   cpp/motion/Motion2D.cpp
-  cpp/motion/Motion3D.cpp
   cpp/net/Protocol.cpp
   cpp/net/UDPSocket.cpp
+  cpp/net/EnvServer.cpp
 )
 target_link_libraries(aibf_env_lib PUBLIC aibf_humanoid)
 if(WIN32)
@@ -99,7 +92,6 @@ add_library(aibf_engine STATIC
   cpp/engine/GL.cpp
   cpp/engine/Window.cpp
   cpp/engine/Renderer2D.cpp
-  cpp/engine/Renderer3D.cpp
   cpp/engine/DebugDraw.cpp
 )
 target_link_libraries(aibf_engine PUBLIC aibf_humanoid glfw OpenGL::GL)
@@ -130,16 +122,6 @@ target_link_libraries(aibf_fixture PRIVATE aibf_env_lib)
 add_executable(aibf_motions cpp/tools/make_motions.cpp)
 target_link_libraries(aibf_motions PRIVATE aibf_env_lib)
 
-# The 3D counterpart. Root heights are solved by forward kinematics so an
-# authored crouch actually reaches the floor.
-add_executable(aibf_motions3d cpp/tools/make_motions3d.cpp)
-target_link_libraries(aibf_motions3d PRIVATE aibf_env_lib)
-
-# Plays a 3D reference motion, kinematically or through the motors. The PD
-# preview is the cheap check that a clip is trackable at all.
-add_executable(aibf_view3d cpp/tools/view3d.cpp)
-target_link_libraries(aibf_view3d PRIVATE aibf_env_lib aibf_engine)
-
 add_executable(aibf_env cpp/tools/envserver.cpp)
 target_link_libraries(aibf_env PRIVATE aibf_env_lib aibf_engine)
 target_compile_definitions(aibf_env PRIVATE AIBF_WITH_RENDERER)
@@ -156,11 +138,6 @@ add_executable(aibf_tests
   cpp/tests/test_protocol.cpp
   cpp/tests/test_env.cpp
   cpp/tests/test_motion.cpp
-  cpp/tests/test_body3d.cpp
-  cpp/tests/test_collision3d.cpp
-  cpp/tests/test_joints3d.cpp
-  cpp/tests/test_humanoid3d.cpp
-  cpp/tests/test_motion3d.cpp
 )
 target_link_libraries(aibf_tests PRIVATE aibf_env_lib)
 

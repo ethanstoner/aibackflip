@@ -1,7 +1,10 @@
-// Implementation of the EnvServerT template. Included by EnvServer.h rather
-// than compiled on its own: a template definition has to be visible where it is
-// instantiated, and keeping it out of the header keeps the interface readable.
+#include "net/EnvServer.h"
 
+#include <chrono>
+#include <cstdio>
+
+#include "humanoid/Observation.h"
+#include "humanoid/RewardTerms.h"
 
 namespace aibf::net {
 
@@ -21,8 +24,7 @@ uint32_t makeSessionId() {
 
 }  // namespace
 
-template <typename Env>
-bool EnvServerT<Env>::start(const Config& config, const Options& options) {
+bool EnvServer::start(const EnvConfig& config, const Options& options) {
     const std::string problem = config.validate();
     if (!problem.empty()) {
         lastError_ = "invalid environment config: " + problem;
@@ -35,8 +37,6 @@ bool EnvServerT<Env>::start(const Config& config, const Options& options) {
     sawBye_ = false;
     stats_ = Stats{};
 
-    if (!checkBatchFits(options.numEnvs)) return false;
-
     if (!socket_.bind(options.port, options.bindAddress)) {
         lastError_ = socket_.lastError();
         return false;
@@ -46,28 +46,15 @@ bool EnvServerT<Env>::start(const Config& config, const Options& options) {
     return true;
 }
 
-template <typename Env>
-void EnvServerT<Env>::stop() {
+void EnvServer::stop() {
     socket_.close();
 }
 
-template <typename Env>
-bool EnvServerT<Env>::checkBatchFits(int numEnvs) {
-    if (worstCaseStateBytes<Env>(numEnvs) <= kMaxPacketBytes) return true;
-    const int limit = maxEnvsPerDatagram<Env>();
-    lastError_ = "a batch of " + std::to_string(numEnvs) + " environments needs " +
-                 std::to_string(worstCaseStateBytes<Env>(numEnvs)) +
-                 " bytes for a STATE packet, over the " + std::to_string(kMaxPacketBytes) +
-                 " byte datagram budget; the most that fits is " + std::to_string(limit);
-    return false;
-}
-
-template <typename Env>
-void EnvServerT<Env>::rebuild(int numEnvs, uint64_t seed) {
+void EnvServer::rebuild(int numEnvs, uint64_t seed) {
     batch_.initialize(config_, numEnvs, seed);
 
     const size_t n = static_cast<size_t>(batch_.size());
-    actionScratch_.assign(n * static_cast<size_t>(Batch::actionDim()), Real(0));
+    actionScratch_.assign(n * static_cast<size_t>(EnvBatch::actionDim()), Real(0));
     resetScratch_.assign(n, 0);
 
     currentStep_ = 0;
@@ -76,8 +63,7 @@ void EnvServerT<Env>::rebuild(int numEnvs, uint64_t seed) {
     stats_.step = 0;
 }
 
-template <typename Env>
-int EnvServerT<Env>::poll(int timeoutMs, int maxMessages) {
+int EnvServer::poll(int timeoutMs, int maxMessages) {
     if (!socket_.isOpen()) return 0;
     int handled = 0;
     for (int i = 0; i < maxMessages; ++i) {
@@ -94,15 +80,13 @@ int EnvServerT<Env>::poll(int timeoutMs, int maxMessages) {
     return handled;
 }
 
-template <typename Env>
-void EnvServerT<Env>::run() {
+void EnvServer::run() {
     while (socket_.isOpen() && !shouldStop()) {
         poll(100);
     }
 }
 
-template <typename Env>
-void EnvServerT<Env>::handlePacket(const uint8_t* data, size_t size, const Endpoint& from) {
+void EnvServer::handlePacket(const uint8_t* data, size_t size, const Endpoint& from) {
     Header header;
     if (!decodeHeader(data, size, header)) {
         ++stats_.malformedPacketsDropped;
@@ -134,8 +118,7 @@ void EnvServerT<Env>::handlePacket(const uint8_t* data, size_t size, const Endpo
     }
 }
 
-template <typename Env>
-void EnvServerT<Env>::handleHello(const uint8_t* data, size_t size, const Endpoint& from) {
+void EnvServer::handleHello(const uint8_t* data, size_t size, const Endpoint& from) {
     HelloMessage hello;
     if (!decodeHello(data, size, hello)) {
         ++stats_.malformedPacketsDropped;
@@ -150,10 +133,6 @@ void EnvServerT<Env>::handleHello(const uint8_t* data, size_t size, const Endpoi
     // Reconnecting with a different setting is a normal thing to want and the
     // alternative is a silent mismatch between the two sides.
     const int requested = hello.numEnvs > 0 ? hello.numEnvs : options_.numEnvs;
-    if (!checkBatchFits(requested)) {
-        sendError(from, lastError_);
-        return;
-    }
     if (requested != batch_.size()) {
         rebuild(requested, hello.seed ? hello.seed : options_.seed);
     } else if (hello.seed != 0) {
@@ -162,16 +141,20 @@ void EnvServerT<Env>::handleHello(const uint8_t* data, size_t size, const Endpoi
 
     SpecMessage spec;
     spec.numEnvs = static_cast<uint16_t>(batch_.size());
-    spec.obsDim = static_cast<uint16_t>(Batch::observationDim());
-    spec.actionDim = static_cast<uint16_t>(Batch::actionDim());
-    spec.rewardDim = static_cast<uint16_t>(Batch::rewardTermCount());
+    spec.obsDim = static_cast<uint16_t>(EnvBatch::observationDim());
+    spec.actionDim = static_cast<uint16_t>(EnvBatch::actionDim());
+    spec.rewardDim = static_cast<uint16_t>(EnvBatch::rewardTermCount());
     spec.controlHz = static_cast<float>(config_.controlHz());
     spec.physicsHz = static_cast<float>(config_.physicsHz);
     spec.maxEpisodeSteps = static_cast<uint16_t>(config_.maxEpisodeSteps);
 
-    EnvTraits<Env>::describeActions(config_, spec);
+    for (const JointConfig& joint : config_.humanoid.joints) {
+        spec.actionLower.push_back(static_cast<float>(joint.lowerLimit));
+        spec.actionUpper.push_back(static_cast<float>(joint.upperLimit));
+        spec.actionNames.push_back(joint.name);
+    }
     spec.rewardNames = rewardTermNames();
-    spec.observationNames = EnvTraits<Env>::observationNames();
+    spec.observationNames = ObservationLayout::fieldNames();
 
     Header reply;
     reply.type = MessageType::Spec;
@@ -195,8 +178,7 @@ void EnvServerT<Env>::handleHello(const uint8_t* data, size_t size, const Endpoi
     }
 }
 
-template <typename Env>
-void EnvServerT<Env>::handleReset(const uint8_t* data, size_t size, const Endpoint& from) {
+void EnvServer::handleReset(const uint8_t* data, size_t size, const Endpoint& from) {
     ResetMessage message;
     if (!decodeReset(data, size, message)) {
         ++stats_.malformedPacketsDropped;
@@ -215,8 +197,7 @@ void EnvServerT<Env>::handleReset(const uint8_t* data, size_t size, const Endpoi
     buildAndSendState(from);
 }
 
-template <typename Env>
-void EnvServerT<Env>::handleAction(const Header& header, const uint8_t* data, size_t size,
+void EnvServer::handleAction(const Header& header, const uint8_t* data, size_t size,
                              const Endpoint& from) {
     // An ACTION for the step just completed means our reply was lost. Resending
     // the cached STATE is exactly right and must not advance the simulation:
@@ -241,7 +222,7 @@ void EnvServerT<Env>::handleAction(const Header& header, const uint8_t* data, si
         ++stats_.malformedPacketsDropped;
         return;
     }
-    if (action.numEnvs != batch_.size() || action.actionDim != Batch::actionDim()) {
+    if (action.numEnvs != batch_.size() || action.actionDim != EnvBatch::actionDim()) {
         sendError(from, "action shape does not match the spec");
         return;
     }
@@ -266,12 +247,11 @@ void EnvServerT<Env>::handleAction(const Header& header, const uint8_t* data, si
     buildAndSendState(from);
 }
 
-template <typename Env>
-void EnvServerT<Env>::buildAndSendState(const Endpoint& to) {
+void EnvServer::buildAndSendState(const Endpoint& to) {
     StateMessage state;
     state.numEnvs = static_cast<uint16_t>(batch_.size());
-    state.obsDim = static_cast<uint16_t>(Batch::observationDim());
-    state.rewardDim = static_cast<uint16_t>(Batch::rewardTermCount());
+    state.obsDim = static_cast<uint16_t>(EnvBatch::observationDim());
+    state.rewardDim = static_cast<uint16_t>(EnvBatch::rewardTermCount());
     state.observations.assign(batch_.observations().begin(), batch_.observations().end());
     state.rewardTerms.assign(batch_.rewardTerms().begin(), batch_.rewardTerms().end());
     state.terminated = batch_.terminated();
@@ -297,14 +277,12 @@ void EnvServerT<Env>::buildAndSendState(const Endpoint& to) {
     if (socket_.sendTo(to, cachedState_.data(), cachedState_.size())) ++stats_.packetsSent;
 }
 
-template <typename Env>
-void EnvServerT<Env>::sendCachedState(const Endpoint& to) {
+void EnvServer::sendCachedState(const Endpoint& to) {
     if (cachedState_.empty()) return;
     if (socket_.sendTo(to, cachedState_.data(), cachedState_.size())) ++stats_.packetsSent;
 }
 
-template <typename Env>
-void EnvServerT<Env>::sendError(const Endpoint& to, const std::string& reason) {
+void EnvServer::sendError(const Endpoint& to, const std::string& reason) {
     ErrorMessage message;
     message.reason = reason;
     Header header;
@@ -314,6 +292,5 @@ void EnvServerT<Env>::sendError(const Endpoint& to, const std::string& reason) {
     encodeError(header, message, sendBuffer_);
     if (socket_.sendTo(to, sendBuffer_.data(), sendBuffer_.size())) ++stats_.packetsSent;
 }
-
 
 }  // namespace aibf::net

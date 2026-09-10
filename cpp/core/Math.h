@@ -280,28 +280,6 @@ inline Quat integrate(const Quat& q, const Vec3& omega, Real dt) {
     return normalize(q + dq * (Real(0.5) * dt));
 }
 
-// Exponential-map orientation update: rotate by |omega|*dt about omega, exactly.
-//
-// Preferred over `integrate` anywhere accuracy over many steps matters, which in
-// practice means anything that spins. The first-order form above truncates the
-// series and the renormalize hides it, so the orientation stays a unit
-// quaternion while following slightly the wrong path. For a tumbling body that
-// error shows up as **energy gain**: a free capsule spun about a non-principal
-// axis gained 1.4% of its kinetic energy per second at 2400 Hz under `integrate`
-// while conserving angular momentum perfectly, so the usual momentum check does
-// not catch it. This form holds the same body to under 0.02%.
-//
-// Exact only for constant omega over the step, which is why it is not free of
-// error, just far smaller.
-inline Quat integrateExact(const Quat& q, const Vec3& omega, Real dt) {
-    const Real speed = length(omega);
-    if (speed < kEpsilon) return q;
-    const Real half = speed * dt * Real(0.5);
-    const Real s = std::sin(half) / speed;  // folds in the 1/speed normalize
-    const Quat delta(omega.x * s, omega.y * s, omega.z * s, std::cos(half));
-    return normalize(delta * q);
-}
-
 inline Quat slerp(const Quat& a, const Quat& b, Real t) {
     Real cosTheta = dot(a, b);
     Quat end = b;
@@ -320,70 +298,6 @@ inline Quat slerp(const Quat& a, const Quat& b, Real t) {
 // Shortest-arc rotation taking `a` onto `b`; the residual used by 3D joint
 // constraints and by the imitation pose reward.
 inline Quat rotationBetween(const Quat& a, const Quat& b) { return b * conjugate(a); }
-
-// Two unit vectors perpendicular to `n` and to each other.
-//
-// Used by contacts (a friction basis for the contact plane) and by the hinge
-// joint (the two axes it must not rotate about). The branch keeps the
-// construction away from the degenerate cross product, which would otherwise
-// produce a zero-length tangent exactly when `n` is an axis direction, and an
-// axis direction is the common case rather than a rare one.
-inline void orthonormalBasis(const Vec3& n, Vec3& t1, Vec3& t2) {
-    if (std::abs(n.x) >= Real(0.57735)) {
-        t1 = normalize(Vec3(n.y, -n.x, 0));
-    } else {
-        t1 = normalize(Vec3(0, n.z, -n.y));
-    }
-    t2 = cross(n, t1);
-}
-
-// Log map: the rotation expressed as an axis scaled by its angle, in (-pi, pi].
-//
-// This is the 3D counterpart of `wrapAngle` on a scalar joint error, and it is
-// what lets a 3D motor be written as one implicit PD constraint on a vector
-// instead of three coupled scalar ones. The sign flip takes the shortest arc, so
-// a 359-degree error reads as -1 degree rather than +359 and the motor turns the
-// short way round.
-inline Vec3 rotationVector(const Quat& q) {
-    const Quat shortest = q.w < Real(0) ? -q : q;
-    const Real axisLength = length(shortest.axis());
-    if (axisLength < kEpsilon) return Vec3(0, 0, 0);
-    const Real angle = Real(2) * std::atan2(axisLength, shortest.w);
-    return shortest.axis() * (angle / axisLength);
-}
-
-// Exp map, the inverse of `rotationVector`: an axis scaled by its angle becomes
-// a rotation. This is how a 3-DOF joint target is built from three policy
-// outputs, and it is well behaved everywhere, unlike Euler angles, which gimbal
-// lock exactly where a shoulder spends most of its time.
-inline Quat quatFromRotationVector(const Vec3& v) {
-    const Real angle = length(v);
-    if (angle < kEpsilon) return Quat::identity();
-    return Quat::fromAxisAngle(v / angle, angle);
-}
-
-// Splits `q` into a rotation about `axis` and the rotation left over.
-//
-// Joint limits need this because "how far has the shoulder twisted" and "how far
-// has it swung" are different questions with different limits, and a single
-// angle cannot answer both. `axis` must be a unit vector.
-inline void swingTwistDecomposition(const Quat& q, const Vec3& axis, Quat& swing, Quat& twist) {
-    const Vec3 projected = axis * dot(q.axis(), axis);
-    const Quat raw(projected.x, projected.y, projected.z, q.w);
-    // The projection collapses to zero when the rotation is a half turn about an
-    // axis perpendicular to `axis`. There is genuinely no twist to recover then,
-    // and normalising a zero quaternion would manufacture one.
-    twist = (dot(raw, raw) > kEpsilon) ? normalize(raw) : Quat::identity();
-    swing = q * conjugate(twist);
-}
-
-// Signed rotation about `axis`, in (-pi, pi].
-inline Real twistAngle(const Quat& q, const Vec3& axis) {
-    Quat swing, twist;
-    swingTwistDecomposition(q, axis, swing, twist);
-    const Real angle = Real(2) * std::atan2(dot(twist.axis(), axis), twist.w);
-    return wrapAngle(angle);
-}
 
 // Angle of the rotation, in [0, pi].
 inline Real angleOf(const Quat& q) {

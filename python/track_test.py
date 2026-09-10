@@ -19,6 +19,12 @@ what the figure achieved.
     python python/track_test.py --model checkpoints/imit_backflip_best.pt
     python python/track_test.py --model checkpoints/imit_arm_best.pt \
                                 --config configs/env2d_arm_raise.json
+    python python/track_test.py --model a.pt --compare b.pt
+
+`--compare` grades both checkpoints under the one config, which is the only
+way two policies trained at different falloff rates can be read against each
+other. Their training returns cannot: the M11 falloff runs finished at +62.78
+and +42.70 almost entirely because one reward term was on a different scale.
 
 ## The self-check
 
@@ -358,9 +364,44 @@ def report(label: str, data: dict, clip: ReferenceClip, result: dict,
     return True
 
 
+def compare(labels: list[str], data: list[dict], results: list[dict],
+            clip: ReferenceClip, deciles: int) -> None:
+    """Side by side, on the quantities that survive a change of falloff.
+
+    Mean joint error is in radians and means the same thing whatever `k` each
+    policy was trained at. `pose_match` only means the same thing because both
+    were graded under one config here - reading each policy's own training
+    return against the other's is the mistake this table exists to avoid, and
+    it is not a hypothetical one: the M11 falloff runs finished at +62.78 and
+    +42.70 almost entirely because one term was on a different scale.
+    """
+    errors = [r["angle_error"] for r in results]
+    print(f"--- {labels[0]} against {labels[1]}, both graded at the same falloff ---\n")
+    print(f"  {'':22s} {labels[0]:>18s} {labels[1]:>18s} {'change':>10s}")
+
+    def row(name: str, a: float, b: float, fmt: str = "{:.3f}") -> None:
+        delta = (b - a) / a * 100.0 if a else float("nan")
+        print(f"  {name:22s} {fmt.format(a):>18s} {fmt.format(b):>18s} {delta:>+9.1f}%")
+
+    row("mean joint error", *[float(np.sqrt((e**2).mean())) for e in errors])
+    row("pose_match", *[float(r["reported_pose"].mean()) for r in results], fmt="{:.4f}")
+    row("worst joint rms", *[float(np.sqrt((e**2).mean(axis=0)).max()) for e in errors])
+
+    print(f"\n  {'phase':>12s} {labels[0]:>18s} {labels[1]:>18s}   joint rms, rad")
+    edges = np.linspace(0.0, 1.0, deciles + 1)
+    for d in range(deciles):
+        cells = []
+        for entry, error in zip(data, errors):
+            mask = np.clip(np.digitize(entry["phase"], edges[1:-1]), 0, deciles - 1) == d
+            cells.append(float(np.sqrt((error[mask] ** 2).mean())) if mask.any() else float("nan"))
+        print(f"  {edges[d]:>5.2f}-{edges[d + 1]:<6.2f} {cells[0]:>18.3f} {cells[1]:>18.3f}")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", required=True)
+    parser.add_argument("--compare", default=None,
+                        help="a second checkpoint, graded under the same config")
     parser.add_argument("--config", default="configs/env2d_backflip_capture.json")
     parser.add_argument("--motion", default=None,
                         help="override the clip; defaults to the config's imitation.motion")
@@ -394,25 +435,39 @@ def main() -> int:
     scales.update({k: float(v) for k, v in imitation.get("scales", {}).items()
                    if k in scales})
 
-    model = Path(args.model)
-    if not model.is_file():
-        print(f"no such checkpoint: {model}", file=sys.stderr)
-        return 1
+    models = [Path(args.model)]
+    if args.compare:
+        models.append(Path(args.compare))
+    for model in models:
+        if not model.is_file():
+            print(f"no such checkpoint: {model}", file=sys.stderr)
+            return 1
 
     clip = ReferenceClip.load(motion)
-    try:
-        data = collect(model, config_path, args, loops=clip.loop)
-    except BridgeError as exc:
-        print(f"bridge error: {exc}", file=sys.stderr)
-        return 1
-    if data["episodes"] == 0:
-        print("no episodes finished; nothing to report", file=sys.stderr)
-        return 1
+    collected: list[dict] = []
+    analysed: list[dict] = []
+    trustworthy = True
+    for model in models:
+        try:
+            data = collect(model, config_path, args, loops=clip.loop)
+        except BridgeError as exc:
+            print(f"bridge error: {exc}", file=sys.stderr)
+            return 1
+        if data["episodes"] == 0:
+            print("no episodes finished; nothing to report", file=sys.stderr)
+            return 1
+        result = analyse(data, clip, scales)
+        trustworthy &= report(model.stem, data, clip, result, scales, args.deciles)
+        print()
+        collected.append(data)
+        analysed.append(result)
 
-    result = analyse(data, clip, scales)
-    ok = report(model.stem, data, clip, result, scales, args.deciles)
-    print()
-    return 0 if ok else 2
+    # Both were run against one config, so both were graded at one falloff and
+    # the two pose_match columns are the same measurement.
+    if len(models) == 2 and trustworthy:
+        compare([m.stem for m in models], collected, analysed, clip, args.deciles)
+        print()
+    return 0 if trustworthy else 2
 
 
 if __name__ == "__main__":

@@ -952,11 +952,17 @@ The pelvis trace tells the same story: 1.020 standing → 0.245 inverted → 0.7
 
 | motion | verified by | result |
 |---|---|---|
-| arm raise | tracking terms + render | `pose_match` 0.861, `root_match` 0.987, 24/24 |
+| arm raise | tracking terms + render | `pose_match` 0.861, `root_match` 0.987, 24/24 <sup>†</sup> |
 | squat | tracking terms + render | `root_match` 0.938, pelvis cycling 1.007 → 0.718 |
 | jump | height and contact trace + render | 1.368 m peak, genuinely airborne |
 | forward roll | unwrapped rotation + render | −360°, 24/24 complete |
 | **backflip** | unwrapped rotation + render | **+360°, 20/20, 0.72 s airborne** |
+
+<sup>†</sup> Measured against the arm_raise clip as it was, whose reference velocity
+flipped sign once per loop. M11 fixed that and retrained: `pose_match` 0.924,
+mean joint error 0.057 rad. The 0.861 above is left as it was recorded rather
+than quietly restated, because it is what the number was and the reason it
+moved is the interesting part.
 
 ### Not attempted
 
@@ -1647,3 +1653,34 @@ timing the round trip through the bridge and not the solver.
 
 Corrected to the measured rate, with the benchmark quoted next to it and
 labelled as what it is.
+
+### The looping clips, retrained against a reference that makes sense
+
+`imit_arm_best` was trained against the arm raise as it was, so once the loop
+point was fixed it was scoring against a clip it had never seen. Retrained on
+the corrected one, same config, 8M steps:
+
+| | old clip | corrected clip |
+|---|---|---|
+| `pose_match` | 0.861 <sup>as recorded in M7</sup> | **0.924** |
+| `pose_match`, old policy re-graded | — | 0.703 |
+| mean joint error | — | **0.057 rad (3.3°)** |
+| worst joint rms | 0.250 rad | 0.107 rad |
+
+Three numbers, and the middle one is the one worth having. 0.703 is what the
+old policy scores against the corrected clip: the reference moved out from
+under it, and most of the drop from 0.861 is that rather than anything about
+the policy. 0.924 is what a policy trained on the corrected clip reaches, and
+it beats the record set against the broken one.
+
+So the fix did not only remove an absurdity from the reference. It made the
+clip **easier to track**, which is what should happen when a motion stops
+demanding an infinite acceleration once per period. The improvement is uniform
+across phase, unlike the backflip's, which is the expected shape: the defect
+was at one instant but the tangent it corrupted governs the whole first and
+last segment.
+
+`--compare` was added to `track_test.py` for this, and grades both checkpoints
+under one config. Reading two policies against their own training returns is
+the mistake it exists to prevent, and the falloff experiment above is the
+demonstration: +62.78 against +42.70, almost entirely a change of scale.

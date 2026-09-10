@@ -14,8 +14,8 @@ and a hand-written rigid-body solver does the rest.
 | forward roll, -360 deg | vertical jump | recovering from a 135 N.s shove | hit with 300 N.s at the apex |
 
 ```
-12,100 lines of C++      rigid-body physics, constraint solver, humanoid, OpenGL renderer
- 3,500 lines of Python   PPO, GAE, policy, normalisation, evaluation harnesses
+12,054 lines of C++      rigid-body physics, constraint solver, humanoid, OpenGL renderer
+ 3,478 lines of Python   PPO, GAE, policy, normalisation, evaluation harnesses
    289 tests             212 C++, 77 Python, all green
      2 dependencies      GLFW for the window, PyTorch for autograd. Nothing else is vendored.
 ```

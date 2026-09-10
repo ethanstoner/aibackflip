@@ -29,9 +29,22 @@ import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-# Dense enough that linear interpolation between neighbours is far below any
-# tracking error worth reporting, and small enough to dump in milliseconds.
-DEFAULT_SAMPLES = 1024
+# Chosen by the *rate* table, not the angle table. Angles converge quadratically
+# with the grid because the sampled pose is smooth; rates converge only linearly,
+# because the rate curve has a corner at every keyframe - Hermite is continuous
+# in velocity but not in acceleration - and linear interpolation across a corner
+# is first-order however fine the grid. Measured worst case across the five
+# shipped clips:
+#
+#   samples   angle error      rate error
+#      1024   1.3e-4 rad       9.6e-2 rad/s
+#      4096   8.5e-6 rad       2.3e-2 rad/s
+#      8192   2.6e-6 rad       9.9e-3 rad/s
+#
+# 4096 puts the worst disagreement it can cause in a reconstructed reward term
+# at 2e-3, eight times under the threshold at which track_test.py stops
+# trusting itself, and costs about 0.1 s per clip.
+DEFAULT_SAMPLES = 4096
 
 
 def tool_binary(name: str) -> Path:
@@ -215,12 +228,17 @@ class ReferenceClip:
         excess = self.limit_excess()
         return float(np.exp(-scale * (excess**2).sum(axis=1)).min())
 
-    def max_grid_error(self, path: str | Path) -> float:
-        """Worst joint-angle disagreement, in radians, against a 4x finer grid.
+    def max_grid_error(self, path: str | Path) -> tuple[float, float]:
+        """Worst (angle, rate) disagreement against a 4x finer grid.
 
         The cost of reading a table instead of calling the sampler. Reported
-        rather than assumed, because "dense enough" is a claim about the clip's
-        curvature and not about the number 1024.
+        rather than assumed, because "dense enough" is a claim about how sharply
+        a particular clip turns and not about the number in DEFAULT_SAMPLES.
+        Both are returned because they converge at different orders and the
+        rate is always the one that decides the grid.
         """
         fine = ReferenceClip.load(path, samples=4 * (len(self.phase) - 1) + 1)
-        return float(np.abs(self.angles_at(fine.phase) - fine.angles).max())
+        return (
+            float(np.abs(self.angles_at(fine.phase) - fine.angles).max()),
+            float(np.abs(self.rates_at(fine.phase) - fine.rates).max()),
+        )

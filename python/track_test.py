@@ -125,6 +125,30 @@ def load_config(path: Path) -> dict:
     return json.loads(strip_json_comments(path.read_text(encoding="utf-8")))
 
 
+def decode_phase(observations: np.ndarray) -> np.ndarray:
+    """Phase in [0, 1) from the sin/cos pair the observation carries.
+
+    Ambiguous at the ends by construction: phase 1.0 encodes to exactly the
+    same pair as phase 0.0. Callers that care about a one-shot clip's final
+    step have to resolve that from context; this cannot.
+    """
+    angle = np.arctan2(observations[:, OBS_PHASE_SINCOS],
+                       observations[:, OBS_PHASE_SINCOS + 1])
+    return np.mod(angle / (2.0 * np.pi), 1.0)
+
+
+def resolve_phase(encoded: np.ndarray, previous: np.ndarray, loops: bool) -> np.ndarray:
+    """Reads a decoded phase back to 1.0 where the encoding folded it onto 0.0.
+
+    A one-shot clip clamps at phase 1.0 and never runs backwards inside an
+    episode, so a drop across a single control step is the fold and not
+    progress. A looping clip really does return to 0, so it is left alone.
+    """
+    if loops:
+        return encoded
+    return np.where(encoded + 0.5 < previous, 1.0, encoded)
+
+
 def wrap(angle: np.ndarray) -> np.ndarray:
     """To (-pi, pi], matching wrapAngle in the simulator.
 
@@ -134,8 +158,11 @@ def wrap(angle: np.ndarray) -> np.ndarray:
     return np.arctan2(np.sin(angle), np.cos(angle))
 
 
-def collect(model: Path, config_path: Path, args: argparse.Namespace) -> dict:
+def collect(model: Path, config_path: Path, args: argparse.Namespace,
+            loops: bool) -> dict:
     """Runs the policy and returns per-step tracking data.
+
+    Two boundary details decide whether any of this means anything.
 
     Steps where an episode ended are read from `final_observation` rather than
     from the live observation. After an auto-reset the live observation already
@@ -144,6 +171,14 @@ def collect(model: Path, config_path: Path, args: argparse.Namespace) -> dict:
     pose against a reference phase near the end of the clip. That mistake would
     add a large error to the last step of every episode and look exactly like a
     policy that cannot land.
+
+    And phase is on the wire as sin and cos of phase x 2pi, so **phase 1.0 and
+    phase 0.0 are the same two numbers**. For a one-shot clip those are
+    different instants with different reference velocities - the end of a
+    backflip is not the beginning of one - and reading the encoding alone puts
+    the last step of every episode at the start of the clip. Phase within an
+    episode never decreases for a one-shot clip, so a drop is the clamp at 1.0
+    and is read as such.
     """
     port = free_port()
     server = subprocess.Popen(
@@ -182,6 +217,7 @@ def collect(model: Path, config_path: Path, args: argparse.Namespace) -> dict:
         )
         env = HumanoidVecEnv(client, weights)
         raw_obs = env.reset(seed=args.seed)
+        previous_phase = decode_phase(raw_obs)
 
         step = 0
         while episodes < args.episodes and step < args.max_steps:
@@ -205,9 +241,16 @@ def collect(model: Path, config_path: Path, args: argparse.Namespace) -> dict:
             sincos = state[:, OBS_JOINT_SINCOS : OBS_JOINT_SINCOS + 2 * JOINT_COUNT]
             angles.append(np.arctan2(sincos[:, 0::2], sincos[:, 1::2]))
             velocities.append(state[:, OBS_JOINT_VELOCITY : OBS_JOINT_VELOCITY + JOINT_COUNT])
-            phase = np.arctan2(state[:, OBS_PHASE_SINCOS], state[:, OBS_PHASE_SINCOS + 1])
-            phases.append(np.mod(phase / (2.0 * np.pi), 1.0))
+
+            phase = resolve_phase(decode_phase(state), previous_phase, loops)
+            phases.append(phase)
             terms.append(info["reward_terms"].copy())
+
+            # The next reading of a finished environment belongs to its
+            # replacement episode, so the monotonicity above restarts there.
+            previous_phase = phase.copy()
+            if finished.any():
+                previous_phase[finished] = decode_phase(raw_obs)[finished]
 
             episodes += len(info["episodes"])
             step += 1
@@ -271,8 +314,9 @@ def report(label: str, data: dict, clip: ReferenceClip, result: dict,
     print(f"  {'joint_velocity_match':22s} {result['reported_rate'].mean():>10.4f} "
           f"{result['rebuilt_rate'].mean():>10.4f} {result['rate_agreement']:>11.2e}")
 
-    if result["pose_agreement"] > AGREEMENT_TOLERANCE:
-        print("\n  STOP: the rebuilt pose term does not match the simulator's own.")
+    worst = max(result["pose_agreement"], result["rate_agreement"])
+    if worst > AGREEMENT_TOLERANCE:
+        print("\n  STOP: a rebuilt term does not match the simulator's own.")
         print("  Python and the reward are not looking at the same state, so the")
         print("  per-joint breakdown below would be fiction. Not printed.")
         return False
@@ -357,7 +401,7 @@ def main() -> int:
 
     clip = ReferenceClip.load(motion)
     try:
-        data = collect(model, config_path, args)
+        data = collect(model, config_path, args, loops=clip.loop)
     except BridgeError as exc:
         print(f"bridge error: {exc}", file=sys.stderr)
         return 1

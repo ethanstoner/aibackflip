@@ -76,20 +76,24 @@ def test_the_grid_is_dense_enough_to_be_worth_reading(motions_binary: Path):
     Measured against a 4x finer grid rather than asserted from the sample
     count: "dense enough" is a claim about how sharply the clip turns, and the
     backflip turns much harder than the arm raise.
+
+    The rate bound is the loose one and it is the one that matters. Angles
+    converge quadratically with the grid; rates converge only linearly, because
+    the rate curve has a corner at every keyframe and no amount of refinement
+    makes linear interpolation second-order across a corner. Measured worst
+    case at 4096 samples: 8.5e-6 rad and 2.3e-2 rad/s, against joint rates that
+    reach 50 rad/s during a flip.
     """
-    worst = 0.0
+    worst_angle = worst_rate = 0.0
     for name in CLIPS:
         path = f"motions/{name}.json"
         clip = ReferenceClip.load(path)
-        error = clip.max_grid_error(path)
-        worst = max(worst, error)
-        assert error < 1e-3, f"{name} needs a denser grid: {error:.2e} rad"
-    # The measured worst case at 1024 samples is 1.3e-4 rad on the backflip,
-    # which is 0.008 degrees against tracking errors that run in tenths of a
-    # radian - three orders of magnitude below anything this is used to
-    # measure. The bound is here so a regression in the sampler shows up as a
-    # number rather than as a mysteriously worse policy.
-    assert worst < 2e-4
+        angle_error, rate_error = clip.max_grid_error(path)
+        worst_angle = max(worst_angle, angle_error)
+        worst_rate = max(worst_rate, rate_error)
+        assert angle_error < 1e-4, f"{name} needs a denser grid: {angle_error:.2e} rad"
+    assert worst_angle < 2e-5
+    assert worst_rate < 5e-2
 
 
 def test_a_looping_clip_wraps_and_a_one_shot_clip_clamps(motions_binary: Path):

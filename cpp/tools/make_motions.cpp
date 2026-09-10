@@ -10,11 +10,25 @@
 //
 //   aibf_motions motions/
 //
+// It also reads clips back out, as a CSV of what the reference asks for at each
+// phase:
+//
+//   aibf_motions --dump motions/backflip.json [--samples 512]
+//
+// That mode exists so the analysis scripts can grade a policy against the
+// reference without a second implementation of Hermite sampling living in
+// Python. A duplicated interpolator would be a place for the two sides to
+// silently disagree, and the disagreement would look exactly like a tracking
+// failure. Shelling out to the same sampler the reward uses removes that
+// possibility rather than testing for it.
+//
 // Sign convention, derived in M2 and confirmed by rendering the squat pose:
 // positive rotation is counter-clockwise, and for a figure facing +X that tips
 // the head backwards. A backflip is therefore a *positive* root rotation
 // through +2*pi; a forward roll is negative.
+#include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -216,9 +230,91 @@ bool write(Motion2D motion, const Humanoid2DConfig& config, const std::string& d
     return true;
 }
 
+// ------------------------------------------------------------------- dump
+//
+// The reference at `samples` evenly spaced phases, as CSV on stdout. The
+// comment header carries the joint names and each joint's limits, so a reader
+// never has to hardcode the joint order and can see at a glance whether the
+// clip asks for a pose the figure is not allowed to hold.
+//
+// Phases are inclusive of both ends: sample i is i/(samples-1), so a
+// one-shot clip's final pose is actually in the table rather than one step
+// short of it.
+int dump(const std::string& path, int samples, const Humanoid2DConfig& config) {
+    std::string error;
+    const Motion2D motion = Motion2D::loadFile(path, &error);
+    if (!error.empty()) {
+        std::fprintf(stderr, "%s: %s\n", path.c_str(), error.c_str());
+        return 1;
+    }
+    if (samples < 2) {
+        std::fprintf(stderr, "--samples must be at least 2\n");
+        return 1;
+    }
+
+    const int joints = motion.jointCount;
+    std::printf("# name=%s duration=%.9g loop=%d joints=%d frames=%d samples=%d\n",
+                motion.name.c_str(), double(motion.duration()), motion.loop ? 1 : 0, joints,
+                motion.frameCount(), samples);
+
+    std::printf("# joint_names=");
+    for (int j = 0; j < joints; ++j) {
+        const char* name = j < static_cast<int>(config.joints.size())
+                               ? config.joints[static_cast<size_t>(j)].name.c_str()
+                               : "?";
+        std::printf("%s%s", j ? "," : "", name);
+    }
+    std::printf("\n# joint_limits=");
+    for (int j = 0; j < joints; ++j) {
+        if (j >= static_cast<int>(config.joints.size())) break;
+        const JointConfig& jc = config.joints[static_cast<size_t>(j)];
+        std::printf("%s%.9g:%.9g", j ? "," : "", double(jc.lowerLimit), double(jc.upperLimit));
+    }
+    std::printf("\n");
+
+    std::printf("phase,time,root_x,root_y,root_angle");
+    for (int j = 0; j < joints; ++j) std::printf(",q%d", j);
+    for (int j = 0; j < joints; ++j) std::printf(",dq%d", j);
+    std::printf("\n");
+
+    for (int i = 0; i < samples; ++i) {
+        const Real phase = Real(i) / Real(samples - 1);
+        const MotionPose pose = motion.samplePhase(phase);
+        const MotionPose rate = motion.samplePhaseVelocity(phase);
+        std::printf("%.9g,%.9g,%.9g,%.9g,%.9g", double(phase), double(motion.timeAt(phase)),
+                    double(pose.rootPosition.x), double(pose.rootPosition.y),
+                    double(pose.rootAngle));
+        for (int j = 0; j < joints; ++j) {
+            std::printf(",%.9g", double(pose.jointAngles[static_cast<size_t>(j)]));
+        }
+        for (int j = 0; j < joints; ++j) {
+            std::printf(",%.9g", double(rate.jointAngles[static_cast<size_t>(j)]));
+        }
+        std::printf("\n");
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
+    std::string dumpPath;
+    int samples = 512;
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--dump") == 0 && i + 1 < argc) {
+            dumpPath = argv[++i];
+        } else if (std::strcmp(argv[i], "--samples") == 0 && i + 1 < argc) {
+            samples = std::atoi(argv[++i]);
+        }
+    }
+    if (!dumpPath.empty()) {
+        World2D probe;
+        Humanoid2D unused;
+        const Humanoid2DConfig config = Humanoid2DConfig::defaults();
+        unused.build(probe, config);
+        return dump(dumpPath, samples, config);
+    }
+
     const std::string directory = argc > 1 ? argv[1] : "motions";
 
     // A world is needed only because Humanoid2D caches its kinematics at build

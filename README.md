@@ -268,6 +268,8 @@ Reproduce the headline measurements:
 ```powershell
 python python\flight_test.py --model checkpoints\imit_backflip_best.pt `
                              --magnitudes 0 100 200 300 400 --offset 0.4
+python python\flight_test.py --model checkpoints\imit_backflip_robust_latest.pt `
+                             --magnitudes 0 400 --offset 0.4 --episodes 96 --envs 8
 python python\push_test.py   --model checkpoints\robust_v1_best.pt `
                              --interval 45 --magnitudes 100 115 130 145 160
 python python\track_test.py  --model checkpoints\k025_gentle_best.pt `

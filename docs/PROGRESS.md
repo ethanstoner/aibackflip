@@ -1765,3 +1765,17 @@ entirely by a sentence that implied a clean threshold between the two numbers it
 did quote. Every rounding went the flattering way. That is the third claim this
 rule has cost its original wording, and the first found by re-running the whole
 table at once rather than by doubting one number.
+
+### `--envs` is part of the measurement
+
+The shove-trained row re-ran at 43% instead of the 44% on record, over 96
+episodes. The difference is one episode, and the cause is that it was re-run
+with `--envs 12` rather than the default 8. Each environment is seeded
+separately, so the environment count decides which 96 episodes get drawn, not
+merely how fast they are drawn. At the default it is 44%, exactly as recorded.
+
+Harmless here and not harmless in general: it means an evaluation is only
+reproducible if the environment count is pinned along with the seed. That row
+had no command in the README at all, which is the same gap the push recovery
+claim fell into. Both now carry the flags that regenerate them, `--envs`
+included.

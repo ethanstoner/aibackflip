@@ -52,13 +52,27 @@ from rl.policy import load_checkpoint  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-# Observation slots this script reads. Imported rather than hardcoded would be
-# better, but the layout lives in C++; docs/OBSERVATIONS.md is the contract.
-OBS_PELVIS_HEIGHT = 0  # in units of the rest-pose height, so 1.0 is standing
-OBS_ORIENTATION_SIN = 1
-OBS_ORIENTATION_COS = 2
-OBS_ANGULAR_VELOCITY = 5
-OBS_FOOT_CONTACTS = 102  # two flags, left and right
+# Observation slots this script reads, by the names the SPEC handshake carries.
+#
+# These used to be the literals 0, 1, 2, 5 and 102, with a comment saying that
+# resolving them properly would be better. It is better, and it costs four
+# lines: the whole point of the handshake is that the simulator tells Python
+# the layout, and a script that hardcodes indices anyway gets a silently wrong
+# answer the day a field is inserted - reading somebody else's number with
+# perfect confidence.
+OBS_FIELDS = ("pelvis_height", "pelvis_sin", "pelvis_cos", "pelvis_w",
+              "contact_foot_l", "contact_foot_r")
+
+
+def field_indices(names: list[str]) -> dict[str, int]:
+    """Maps each field this script needs onto its slot, or fails loudly."""
+    missing = [field for field in OBS_FIELDS if field not in names]
+    if missing:
+        raise BridgeError(
+            f"the simulator's observation has no {missing}; this script reads "
+            f"fields by name and cannot guess a layout. Available: {names}"
+        )
+    return {field: names.index(field) for field in OBS_FIELDS}
 
 
 def env_binary() -> Path:
@@ -163,6 +177,7 @@ def evaluate(model: Path, magnitude: float, args: argparse.Namespace,
     try:
         client = EnvClient("127.0.0.1", port, timeout=5.0)
         spec = client.connect(num_envs=args.envs, seed=args.seed)
+        slot = field_indices(list(spec.observation_names))
 
         policy, normalizer, meta, _ = load_checkpoint(
             model, device=args.device,
@@ -182,7 +197,7 @@ def evaluate(model: Path, magnitude: float, args: argparse.Namespace,
         # Rotation is integrated per environment because auto-reset teleports
         # the observation back to a standing pose; differencing across that
         # boundary would invent a whole spin that never happened.
-        previous = np.arctan2(raw_obs[:, OBS_ORIENTATION_SIN], raw_obs[:, OBS_ORIENTATION_COS])
+        previous = np.arctan2(raw_obs[:, slot['pelvis_sin']], raw_obs[:, slot['pelvis_cos']])
         total = np.zeros(args.envs)
 
         # The witness is the jump in angular velocity across the step the shove
@@ -190,7 +205,7 @@ def evaluate(model: Path, magnitude: float, args: argparse.Namespace,
         # rad/s under its own power, so a peak would be the same with or without
         # a disturbance and would certify a broken sweep as a working one.
         episode_step = np.zeros(args.envs, dtype=np.int64)
-        previous_spin = raw_obs[:, OBS_ANGULAR_VELOCITY].copy()
+        previous_spin = raw_obs[:, slot['pelvis_w']].copy()
         kicks: list[float] = []
 
         # Peak height and time off the ground, per episode. Averaging height
@@ -213,7 +228,7 @@ def evaluate(model: Path, magnitude: float, args: argparse.Namespace,
             raw_obs, _, _, _, info = env.step(actions.cpu().numpy())
 
             episode_step += 1
-            spin = raw_obs[:, OBS_ANGULAR_VELOCITY]
+            spin = raw_obs[:, slot['pelvis_w']]
             # A window of two covers the shove whether the schedule fires before
             # or after the step counter advances.
             on_the_beat = (episode_step == args.at_step) | (episode_step == args.at_step + 1)
@@ -237,14 +252,14 @@ def evaluate(model: Path, magnitude: float, args: argparse.Namespace,
             if finished.any() and final.size:
                 ended_in[finished] = final
 
-            peak_height = np.maximum(peak_height, ended_in[:, OBS_PELVIS_HEIGHT])
-            contacts = ended_in[:, OBS_FOOT_CONTACTS:OBS_FOOT_CONTACTS + 2]
+            peak_height = np.maximum(peak_height, ended_in[:, slot['pelvis_height']])
+            contacts = ended_in[:, slot['contact_foot_l']:slot['contact_foot_r'] + 1]
             airborne_steps += (contacts.max(axis=1) < 0.5).astype(np.int64)
 
             # Advance every environment to where it actually ended up: the final
             # observation for the ones that finished, the live one for the rest.
-            current = np.arctan2(ended_in[:, OBS_ORIENTATION_SIN],
-                                 ended_in[:, OBS_ORIENTATION_COS])
+            current = np.arctan2(ended_in[:, slot['pelvis_sin']],
+                                 ended_in[:, slot['pelvis_cos']])
             # Orientation travels as sin and cos, so a step's rotation can only
             # be recovered up to a multiple of 2*pi and the shortest arc is
             # assumed. That assumption is sound while the figure turns less
@@ -270,7 +285,7 @@ def evaluate(model: Path, magnitude: float, args: argparse.Namespace,
             if finished.any():
                 previous = np.where(
                     finished,
-                    np.arctan2(raw_obs[:, OBS_ORIENTATION_SIN], raw_obs[:, OBS_ORIENTATION_COS]),
+                    np.arctan2(raw_obs[:, slot['pelvis_sin']], raw_obs[:, slot['pelvis_cos']]),
                     previous,
                 )
                 episode_step[finished] = 0

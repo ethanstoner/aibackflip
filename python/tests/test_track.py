@@ -15,9 +15,57 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from track_test import decode_phase, resolve_phase, wrap
+from communication.client import BridgeError
+from track_test import decode_phase, field_indices, resolve_phase, wrap
 
 PHASE = 109  # index of phase_sin in the observation
+
+
+JOINTS = ["waist", "neck", "shoulder_l", "elbow_l", "shoulder_r", "elbow_r",
+          "hip_l", "knee_l", "ankle_l", "hip_r", "knee_r", "ankle_r"]
+
+
+def observation_names() -> list[str]:
+    """A layout shaped like the simulator's, with the joint blocks in order."""
+    names = ["pelvis_height", "pelvis_sin", "pelvis_cos", "pad_a", "pad_b", "pelvis_w"]
+    names += [f"{joint}_{suffix}" for joint in JOINTS for suffix in ("sin", "cos")]
+    names += [f"{joint}_vel" for joint in JOINTS]
+    names += ["phase_sin", "phase_cos"]
+    return names
+
+
+def test_slots_are_resolved_by_name_not_by_position():
+    slot = field_indices(observation_names(), JOINTS)
+    names = observation_names()
+    for index, joint in enumerate(JOINTS):
+        assert names[slot["joint_sin"][index]] == f"{joint}_sin"
+        assert names[slot["joint_cos"][index]] == f"{joint}_cos"
+        assert names[slot["joint_vel"][index]] == f"{joint}_vel"
+    assert names[slot["phase_sin"]] == "phase_sin"
+
+
+def test_a_reordered_observation_still_reads_the_right_joint():
+    """The point of resolving by name rather than tidiness.
+
+    The clip's joint order and the observation's are maintained in two
+    different places, and every comparison downstream pairs them index by
+    index. Reversing one here must not silently grade the left knee against
+    the right hip.
+    """
+    names = observation_names()
+    reversed_joints = list(reversed(JOINTS))
+    slot = field_indices(names, reversed_joints)
+    for index, joint in enumerate(reversed_joints):
+        assert names[slot["joint_vel"][index]] == f"{joint}_vel"
+
+
+def test_a_layout_without_the_fields_stops_the_run():
+    with pytest.raises(BridgeError):
+        field_indices(["pelvis_height", "phase_sin", "phase_cos"], JOINTS)
+    with pytest.raises(BridgeError):
+        # Phase missing: a non-imitation observation, which has nothing to
+        # track against and must not be reported as perfect tracking.
+        field_indices([n for n in observation_names() if not n.startswith("phase")], JOINTS)
 
 
 def observation_with_phase(values) -> np.ndarray:

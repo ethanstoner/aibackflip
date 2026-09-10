@@ -63,12 +63,32 @@ from communication.vec_env import HumanoidVecEnv, RewardWeights  # noqa: E402
 from reference import REPO_ROOT, ReferenceClip, tool_binary  # noqa: E402
 from rl.policy import load_checkpoint  # noqa: E402
 
-# Observation slices this script reads; docs/OBSERVATIONS.md is the contract.
-OBS_JOINT_SINCOS = 66  # 12 joints, sin then cos, interleaved per joint
-OBS_JOINT_VELOCITY = 90  # 12 joints, rad/s
-OBS_PHASE_SINCOS = 109  # sin, cos of phase * 2pi
+def field_indices(names: list[str], joints: list[str]) -> dict[str, np.ndarray | int]:
+    """Resolves the slices this script reads, by name, from the SPEC handshake.
 
-JOINT_COUNT = 12
+    Not just hygiene. The joint order lives in two places that are maintained
+    apart - the humanoid config, which is where the reference clip's column
+    order comes from, and `jointShortName` in the observation - and everything
+    below compares one against the other joint by joint. Looking each joint's
+    slot up by the clip's own name for it turns "these two lists are in the
+    same order" from an assumption into a check, and a mismatch stops the run
+    instead of silently grading the left knee against the right hip.
+    """
+    missing = [name for name in ("phase_sin", "phase_cos") if name not in names]
+    missing += [f"{joint}_{suffix}" for joint in joints for suffix in ("sin", "cos", "vel")
+                if f"{joint}_{suffix}" not in names]
+    if missing:
+        raise BridgeError(
+            f"the simulator's observation has no {missing[:4]}; this script reads fields "
+            f"by name and will not guess a layout. The clip's joints are {joints}."
+        )
+    return {
+        "joint_sin": np.array([names.index(f"{j}_sin") for j in joints]),
+        "joint_cos": np.array([names.index(f"{j}_cos") for j in joints]),
+        "joint_vel": np.array([names.index(f"{j}_vel") for j in joints]),
+        "phase_sin": names.index("phase_sin"),
+        "phase_cos": names.index("phase_cos"),
+    }
 
 # Falloff rates the simulator uses when the config does not override them,
 # from ImitationScales in cpp/humanoid/RewardTerms.h.
@@ -131,15 +151,15 @@ def load_config(path: Path) -> dict:
     return json.loads(strip_json_comments(path.read_text(encoding="utf-8")))
 
 
-def decode_phase(observations: np.ndarray) -> np.ndarray:
+def decode_phase(observations: np.ndarray, sin_slot: int = 109,
+                 cos_slot: int = 110) -> np.ndarray:
     """Phase in [0, 1) from the sin/cos pair the observation carries.
 
     Ambiguous at the ends by construction: phase 1.0 encodes to exactly the
     same pair as phase 0.0. Callers that care about a one-shot clip's final
     step have to resolve that from context; this cannot.
     """
-    angle = np.arctan2(observations[:, OBS_PHASE_SINCOS],
-                       observations[:, OBS_PHASE_SINCOS + 1])
+    angle = np.arctan2(observations[:, sin_slot], observations[:, cos_slot])
     return np.mod(angle / (2.0 * np.pi), 1.0)
 
 
@@ -165,7 +185,7 @@ def wrap(angle: np.ndarray) -> np.ndarray:
 
 
 def collect(model: Path, config_path: Path, args: argparse.Namespace,
-            loops: bool) -> dict:
+            joints: list[str], loops: bool) -> dict:
     """Runs the policy and returns per-step tracking data.
 
     Two boundary details decide whether any of this means anything.
@@ -208,6 +228,10 @@ def collect(model: Path, config_path: Path, args: argparse.Namespace,
         client = EnvClient("127.0.0.1", port, timeout=5.0)
         spec = client.connect(num_envs=args.envs, seed=args.seed)
         term_names = list(spec.reward_names)
+        slot = field_indices(list(spec.observation_names), joints)
+
+        def phase_of(observations: np.ndarray) -> np.ndarray:
+            return decode_phase(observations, slot["phase_sin"], slot["phase_cos"])
 
         policy, normalizer, meta, _ = load_checkpoint(
             model, device=args.device,
@@ -223,7 +247,7 @@ def collect(model: Path, config_path: Path, args: argparse.Namespace,
         )
         env = HumanoidVecEnv(client, weights)
         raw_obs = env.reset(seed=args.seed)
-        previous_phase = decode_phase(raw_obs)
+        previous_phase = phase_of(raw_obs)
 
         step = 0
         while episodes < args.episodes and step < args.max_steps:
@@ -244,11 +268,10 @@ def collect(model: Path, config_path: Path, args: argparse.Namespace,
             if finished.any() and final.size:
                 state[finished] = final
 
-            sincos = state[:, OBS_JOINT_SINCOS : OBS_JOINT_SINCOS + 2 * JOINT_COUNT]
-            angles.append(np.arctan2(sincos[:, 0::2], sincos[:, 1::2]))
-            velocities.append(state[:, OBS_JOINT_VELOCITY : OBS_JOINT_VELOCITY + JOINT_COUNT])
+            angles.append(np.arctan2(state[:, slot["joint_sin"]], state[:, slot["joint_cos"]]))
+            velocities.append(state[:, slot["joint_vel"]])
 
-            phase = resolve_phase(decode_phase(state), previous_phase, loops)
+            phase = resolve_phase(phase_of(state), previous_phase, loops)
             phases.append(phase)
             terms.append(info["reward_terms"].copy())
 
@@ -256,7 +279,7 @@ def collect(model: Path, config_path: Path, args: argparse.Namespace,
             # replacement episode, so the monotonicity above restarts there.
             previous_phase = phase.copy()
             if finished.any():
-                previous_phase[finished] = decode_phase(raw_obs)[finished]
+                previous_phase[finished] = phase_of(raw_obs)[finished]
 
             episodes += len(info["episodes"])
             step += 1
@@ -449,7 +472,8 @@ def main() -> int:
     trustworthy = True
     for model in models:
         try:
-            data = collect(model, config_path, args, loops=clip.loop)
+            data = collect(model, config_path, args,
+                           joints=clip.joint_names, loops=clip.loop)
         except BridgeError as exc:
             print(f"bridge error: {exc}", file=sys.stderr)
             return 1

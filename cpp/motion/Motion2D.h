@@ -96,11 +96,22 @@ public:
 
     // Empty when the clip is usable, otherwise a human-readable reason.
     std::string validate() const;
-    // Clamps every joint angle into the config's limits and reports how many
-    // were out of range. An authored pose the humanoid physically cannot hold
-    // is a reference it can never track, so this is worth knowing before
-    // training rather than after.
+    // Clamps every *keyframe* joint angle into the config's limits and reports
+    // how many were out of range. An authored pose the humanoid physically
+    // cannot hold is a reference it can never track, so this is worth knowing
+    // before training rather than after.
     int clampToLimits(const Humanoid2DConfig& config);
+
+    // The worst amount, in radians, by which the *sampled* clip leaves the
+    // joint limits, and zero when it never does.
+    //
+    // This is not the same question as clampToLimits, and clamping does not
+    // answer it. Cubic Hermite overshoots between keyframes by construction, so
+    // a clip whose every authored pose is legal can still sweep past a limit on
+    // the way between two of them. The solver refuses to hold that pose, which
+    // puts a ceiling on the tracking reward that no policy can reach and that
+    // nothing in the clip, the config or the logs would mention.
+    Real worstSampledLimitExcess(const Humanoid2DConfig& config, int samples = 512) const;
 };
 
 }  // namespace aibf

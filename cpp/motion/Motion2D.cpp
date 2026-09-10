@@ -336,6 +336,22 @@ std::string Motion2D::validate() const {
     return std::string();
 }
 
+Real Motion2D::worstSampledLimitExcess(const Humanoid2DConfig& config, int samples) const {
+    if (keyframes.empty() || samples < 2) return 0;
+    Real worst = 0;
+    const size_t limit = std::min(static_cast<size_t>(jointCount), config.joints.size());
+    for (int i = 0; i < samples; ++i) {
+        const Real phase = Real(i) / Real(samples - 1);
+        const MotionPose pose = samplePhase(phase);
+        for (size_t j = 0; j < limit; ++j) {
+            const JointConfig& jc = config.joints[j];
+            const Real angle = pose.jointAngles[j];
+            worst = std::max(worst, std::max(jc.lowerLimit - angle, angle - jc.upperLimit));
+        }
+    }
+    return std::max(Real(0), worst);
+}
+
 int Motion2D::clampToLimits(const Humanoid2DConfig& config) {
     int clamped = 0;
     for (MotionKeyframe& frame : keyframes) {

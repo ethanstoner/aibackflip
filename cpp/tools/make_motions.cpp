@@ -224,9 +224,19 @@ bool write(Motion2D motion, const Humanoid2DConfig& config, const std::string& d
         std::fprintf(stderr, "could not write %s\n", path.c_str());
         return false;
     }
-    std::printf("%-14s %d frames  %.2fs  %s%s\n", motion.name.c_str(), motion.frameCount(),
+    // Reported because clamping the keyframes does not answer it. Hermite
+    // overshoots between them, so a clip whose every authored pose is legal can
+    // still sweep past a limit mid-segment, and the solver will refuse to hold
+    // that pose. It caps the tracking reward at a value no policy can beat.
+    const Real excess = motion.worstSampledLimitExcess(config);
+    std::printf("%-14s %d frames  %.2fs  %s%s%s", motion.name.c_str(), motion.frameCount(),
                 double(motion.duration()), motion.loop ? "looping" : "one-shot",
-                clamped ? "  (clamped angles: yes)" : "");
+                clamped ? "  (clamped keys: yes)" : "",
+                excess > Real(1e-4) ? "" : "\n");
+    if (excess > Real(1e-4)) {
+        std::printf("  <- sampled clip leaves its joint limits by %.4f rad between keyframes\n",
+                    double(excess));
+    }
     return true;
 }
 

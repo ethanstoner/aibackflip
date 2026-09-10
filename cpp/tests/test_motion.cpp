@@ -321,3 +321,51 @@ TEST(Motion, clampToLimitsReportsWhatItChanged) {
     CHECK_NEAR(motion.keyframes[2].jointAngles[kHipR], config.joints[kHipR].lowerLimit, 1e-6);
     CHECK(motion.clampToLimits(config) == 0);  // idempotent
 }
+
+TEST(Motion, clampingEveryKeyframeDoesNotMakeTheSampledClipLegal) {
+    // The trap this exists to name: clampToLimits reports zero and the clip is
+    // still asking for an impossible pose. Cubic Hermite overshoots between
+    // keyframes by construction, so a joint driven hard towards its limit and
+    // then away again sweeps past it in the middle of a segment where no
+    // keyframe is.
+    //
+    // Two of the five shipped clips do exactly this - forward_roll by 0.027 rad
+    // and backflip by 0.017 - and nothing said so until this was measured.
+    const Humanoid2DConfig config = Humanoid2DConfig::defaults();
+    const JointConfig& knee = config.joints[kKneeL];
+
+    Motion2D motion;
+    motion.interpolation = MotionInterpolation::Hermite;
+    for (int i = 0; i < 4; ++i) {
+        MotionKeyframe frame;
+        frame.time = Real(i) * Real(0.25);
+        frame.jointAngles.assign(kJointCount, Real(0));
+        // Rest, hard to the limit, hold, back. The overshoot lands between the
+        // second and third keys, where the tangent is still driving inwards.
+        frame.jointAngles[kKneeL] = (i == 1 || i == 2) ? knee.lowerLimit : Real(0);
+        motion.insertKeyframe(frame);
+    }
+    motion.keyframes[2].jointAngles[kKneeL] = knee.lowerLimit * Real(0.6);
+
+    CHECK(motion.clampToLimits(config) == 0);  // every authored pose is legal
+    const Real excess = motion.worstSampledLimitExcess(config, 512);
+    CHECK(excess > Real(1e-3));  // and the clip still leaves the limits
+
+    // Linear interpolation cannot overshoot, so the same keyframes are clean.
+    Motion2D straight = motion;
+    straight.interpolation = MotionInterpolation::Linear;
+    CHECK_NEAR(straight.worstSampledLimitExcess(config, 512), Real(0), Real(1e-9));
+}
+
+TEST(Motion, aClipInsideItsLimitsReportsNoSampledExcess) {
+    const Humanoid2DConfig config = Humanoid2DConfig::defaults();
+    Motion2D motion = simpleClip();
+    motion.clampToLimits(config);
+    for (MotionKeyframe& frame : motion.keyframes) {
+        for (size_t j = 0; j < frame.jointAngles.size(); ++j) {
+            // Well inside, so no amount of Hermite overshoot can escape.
+            frame.jointAngles[j] *= Real(0.25);
+        }
+    }
+    CHECK_NEAR(motion.worstSampledLimitExcess(config, 256), Real(0), Real(1e-9));
+}

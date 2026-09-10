@@ -15,14 +15,21 @@ checkpoints/*.pt
 checkpoints/*.json
 !checkpoints/.gitkeep
 
-# Except the four the README and docs/PROGRESS.md quote numbers from. 2.2 MB
+# Except the ones the README and docs/PROGRESS.md quote numbers from. 2.2 MB
 # each, and without them every "reproduce this" command in the README fails on
 # a fresh clone - which would make the results unfalsifiable by anyone but me.
+# The rule is the point, not the list: a checkpoint a published number comes
+# from is committed, and a number whose checkpoint is not committed does not
+# get published.
 !checkpoints/imit_backflip_best.pt
 !checkpoints/imit_backflip_robust_latest.pt
 !checkpoints/imit_roll_best.pt
 !checkpoints/imit_jump_v2_best.pt
 !checkpoints/robust_v1_best.pt
+# M11's falloff experiment. The control is deliberately absent: it reproduces
+# imit_backflip_best measurement for measurement, so committing it would ship
+# 2.2 MB to say the same thing twice.
+!checkpoints/k025_gentle_best.pt
 
 # Internal working notes never belong in this repo.
 CLAUDE.md

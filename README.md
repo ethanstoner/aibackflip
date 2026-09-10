@@ -22,6 +22,50 @@ and a hand-written rigid-body solver does the rest.
 
 ---
 
+## How it learns
+
+![training progression](docs/media/progression.gif)
+
+Four checkpoints from **one** training run, attempting the **same** reference
+motion, side by side. Left to right: 120 updates, 720, 960, and 2,880.
+
+The stages were chosen by measurement rather than by even spacing, so the panel
+shows the arc instead of three copies of a solved policy. Every snapshot in the
+run, measured with `flight_test.py` over 12 episodes each:
+
+| updates | flips completed | rotation | peak height | airborne |
+|---|---|---|---|---|
+| 120 | 0% | 89 deg | 1.12x | 0.31 s |
+| 480 | 0% | 191 deg | 1.23x | 0.37 s |
+| 840 | 8% | 260 deg | 1.20x | 0.49 s |
+| 960 | 33% | 226 deg | 1.34x | 0.44 s |
+| 1,080 | 94% | 342 deg | 1.64x | 0.70 s |
+| **1,440** | **42%** | **290 deg** | **1.47x** | **0.52 s** |
+| 1,920 | 94% | 353 deg | 1.57x | 0.70 s |
+| 2,280 | 100% | 360 deg | 1.65x | 0.70 s |
+| 2,880 | 100% | 358 deg | 1.61x | 0.74 s |
+
+The curve is not monotonic. Update 1,080 already lands 94% of flips and update
+1,440 falls back to 42% before recovering. That row is in bold rather than
+omitted: picking only the improving snapshots would have made a cleaner story
+and a false one.
+
+What the numbers describe is a figure that first learns to leave the ground at
+all, then to rotate without finishing, then to finish without landing, and only
+then to land. Rotation and airborne time move together, because a flip is won or
+lost at takeoff: the angular momentum is set the moment the feet leave the
+ground and nothing afterwards can add to it.
+
+Reproduce the whole thing, snapshots included:
+
+```powershell
+.\scripts\train.ps1 -Config configs\ppo_imitate_fast.json `
+                    -EnvConfig configs\env2d_backflip.json -Name flipshow -Envs 64
+.\scripts\showcase.ps1
+```
+
+---
+
 ## Results
 
 Every number here is produced by a command in this repository, run against a checkpoint that is
@@ -190,7 +234,7 @@ Watch a trained policy, or re-render the GIFs above:
 ```powershell
 .\scripts\evaluate.ps1 -Model checkpoints\imit_backflip_best.pt `
                        -EnvConfig configs\env2d_backflip_capture.json
-.\scripts\demo.ps1 -Only backflip
+.\scripts\showcase.ps1 -Only results
 ```
 
 Reproduce the headline measurements:

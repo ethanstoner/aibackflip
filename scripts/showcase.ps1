@@ -52,9 +52,18 @@ function Capture-Policy {
     New-Item -ItemType Directory -Force -Path $frameDir | Out-Null
     $stem = Join-Path $frameDir "f"
 
+    # Hidden, because this runs once per snapshot and a progression pass is two
+    # dozen of them. Without it every capture flashes a console window across
+    # the desktop, which is unusable while anything else is going on.
+    #
+    # The renderer itself is already invisible: the capture path sets
+    # GLFW_VISIBLE false before creating the window. It is the host process's
+    # own console that has to be suppressed here.
+    #
     # Quoted individually: the repo path contains spaces and -ArgumentList
     # splits on whitespace.
     $server = Start-Process -FilePath $EnvExe -PassThru -WorkingDirectory $Root `
+        -WindowStyle Hidden `
         -RedirectStandardOutput (Join-Path $frameDir "server.log") `
         -ArgumentList @("--quiet", "--port", "$UsePort", "--envs", "1",
                         "--config", "`"$Config`"",
@@ -145,19 +154,40 @@ if ($Only -eq "" -or $Only -eq "progression") {
                 -FrameCount $Frames -Spacing $Every -UsePort $usePort
             $count = @(Get-ChildItem $frameDir -Filter "f_*.png").Count
             if ($count -lt $Frames) {
-                Write-Host "  $tag: only $count frames" -ForegroundColor Yellow
+                Write-Host "  ${tag}: only $count frames" -ForegroundColor Yellow
             }
             if ($count -gt 0) { $stages += $frameDir }
             $usePort += 1
         }
 
-        # Four evenly spaced stages side by side, so the same instant of the
-        # same reference motion is compared across training.
-        if ($stages.Count -ge 4) {
+        # Four stages side by side, chosen by *measured* behaviour rather than
+        # by even spacing, so the panel shows the arc instead of three panels of
+        # a solved policy. Measured with flight_test.py, 12 episodes each:
+        #
+        #   update  120   0% of flips   89 deg   barely leaves the ground
+        #   update  720   0%           207 deg   rotates, cannot finish
+        #   update  960  33%           226 deg   sometimes
+        #   update 2880 100%           358 deg   lands it every time
+        #
+        # The full curve is not monotonic. Update 1080 already reached 94% and
+        # update 1440 fell back to 42% before recovering, which is worth knowing
+        # about PPO and worth not hiding by picking only improving stages.
+        $wanted = @("flipshow_snap000120", "flipshow_snap000720",
+                    "flipshow_snap000960", "flipshow_snap002880")
+        $picked = @()
+        foreach ($name in $wanted) {
+            $match = $stages | Where-Object { (Split-Path $_ -Leaf) -eq "aibf_show_$name" }
+            if ($match) { $picked += $match }
+        }
+        if ($picked.Count -lt 4 -and $stages.Count -ge 4) {
+            # Fall back to even spacing if the named snapshots are absent, so a
+            # run with different settings still produces something.
             $picked = @($stages[0],
                         $stages[[int]($stages.Count / 3)],
                         $stages[[int](2 * $stages.Count / 3)],
                         $stages[$stages.Count - 1])
+        }
+        if ($picked.Count -ge 4) {
             $inputs = @()
             foreach ($dir in $picked) { $inputs += @("-framerate", "$Fps", "-i", (Join-Path $dir "f_%02d.png")) }
             $filter = "[0:v]scale=360:-2[a];[1:v]scale=360:-2[b];[2:v]scale=360:-2[c];[3:v]scale=360:-2[d];" +

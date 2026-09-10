@@ -66,7 +66,8 @@ $server = Start-Process -FilePath $EnvExe `
                      "--capture", "`"$Shots.png`"", "--capture-after", "$FirstFrameStep",
                      "--capture-count", "$Frames", "--capture-every", "$FrameIntervalSteps") +
                    $configArgs) `
-    -PassThru -RedirectStandardOutput "$env:TEMP\aibf_capture.log" -WorkingDirectory $Root
+    -PassThru -RedirectStandardOutput "$env:TEMP\aibf_capture.log" -WorkingDirectory $Root `
+    -WindowStyle Hidden
 Start-Sleep -Milliseconds 900
 try {
     # The server exits after the last capture, which ends this client too. That

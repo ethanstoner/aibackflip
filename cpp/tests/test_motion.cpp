@@ -119,6 +119,67 @@ TEST(Motion, aLoopingClipWrapsInTime) {
     CHECK_NEAR(wrapped.rootAngle, atQuarter.rootAngle, 1e-4);
 }
 
+TEST(Motion, aLoopingClipHasOneVelocityAtItsLoopPoint) {
+    // The loop point is a single instant, so the clip has to be moving at one
+    // speed there. Approaching it from the end and leaving it from the start
+    // must therefore agree.
+    //
+    // The sampler used to return the exact *negative* on the two shipped
+    // looping clips: the arm came down at 3.71 rad/s, touched the bottom, and
+    // left going up at 3.71 rad/s in the same instant. Nothing in the reward
+    // could report that, because the reward and the observation both read it
+    // from this same sampler and so agreed with each other perfectly.
+    Motion2D motion = simpleClip();
+    motion.loop = true;
+    // Author it the standard way, with the last keyframe repeating the first.
+    motion.keyframes.back().jointAngles[0] = motion.keyframes.front().jointAngles[0];
+    motion.keyframes.back().rootAngle = motion.keyframes.front().rootAngle;
+    motion.keyframes.back().rootPosition = motion.keyframes.front().rootPosition;
+
+    // Measured either side of the loop point and then ten times closer to it.
+    // A smooth wrap has the two sides converging linearly as the offset
+    // shrinks; a sign flip stays the same size however close the samples get,
+    // so this separates "still turning" from "reverses instantly" rather than
+    // picking a tolerance that happens to pass.
+    auto gapAt = [&](Real epsilon) {
+        const MotionPose leaving = motion.samplePhaseVelocity(epsilon);
+        const MotionPose arriving = motion.samplePhaseVelocity(Real(1) - epsilon);
+        return std::max(std::abs(leaving.jointAngles[0] - arriving.jointAngles[0]),
+                        std::abs(leaving.rootAngle - arriving.rootAngle));
+    };
+    const Real coarse = gapAt(Real(1e-4));
+    const Real fine = gapAt(Real(1e-5));
+    CHECK(fine < Real(1e-3));
+    CHECK(fine < coarse * Real(0.2));  // shrinking with the offset, so no jump
+
+    // And the position must not have a corner there either: the one-sided
+    // slopes of the sampled pose have to agree, or the reference demands an
+    // infinite acceleration at the wrap.
+    const Real h = Real(1e-4);
+    const Real before = motion.samplePhase(Real(1) - h).jointAngles[0];
+    const Real at = motion.samplePhase(Real(1)).jointAngles[0];
+    const Real after = motion.samplePhase(h).jointAngles[0];
+    CHECK_NEAR((at - before) / h, (after - at) / h, 1e-2);
+}
+
+TEST(Motion, aLoopTangentUsesTheKeyframeBeforeTheDuplicatedEnd) {
+    // A three-key loop f0 -> f1 -> f0 turns around at f0, so the velocity there
+    // is zero: the keyframe before the loop point and the one after it are the
+    // same pose. Reading the duplicate endpoint as the previous neighbour makes
+    // it +/-(f1 - f0)/dt instead, which is the largest speed in the clip at the
+    // one place the motion has stopped.
+    Motion2D motion;
+    motion.loop = true;
+    motion.insertKeyframe(key(Real(0.0), Real(0), Real(0.0)));
+    motion.insertKeyframe(key(Real(0.7), Real(0), Real(1.2)));
+    motion.insertKeyframe(key(Real(1.4), Real(0), Real(0.0)));
+
+    CHECK_NEAR(motion.samplePhaseVelocity(Real(0)).jointAngles[0], 0.0, 1e-6);
+    CHECK_NEAR(motion.samplePhaseVelocity(Real(1)).jointAngles[0], 0.0, 1e-6);
+    // Still a real motion in between, not a clip flattened into stillness.
+    CHECK(std::abs(motion.samplePhaseVelocity(Real(0.25)).jointAngles[0]) > Real(1.0));
+}
+
 TEST(Motion, phaseSpansTheWholeClip) {
     const Motion2D motion = simpleClip();
     CHECK_NEAR(motion.samplePhase(Real(0)).jointAngles[0], motion.keyframes.front().jointAngles[0],

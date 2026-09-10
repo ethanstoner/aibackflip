@@ -658,6 +658,14 @@ TEST(Imitation, trackingTermsFallAsTheFigureDriftsFromTheReference) {
     config.imitation.enabled = true;
     config.imitation.motionPath = writeTestClip(scratchFigure);
     config.imitation.earlyTerminationPoseError = 0;  // let it drift freely
+    // Off, so the episode starts at phase 0 and the drift below lands somewhere
+    // known. With it on the start phase is random, and this test used to pass
+    // or fail on where that landed: a run starting at phase 0.51 drifts to
+    // phase 0.07, where the reference is back at the rest pose and a figure
+    // holding the rest pose is *correct* to score 0.97. The assertion is about
+    // the reward falling when the figure leaves the reference, and letting the
+    // reference come to the figure instead tests nothing.
+    config.imitation.referenceStateInit = false;
 
     Env2D env;
     env.initialize(config, 2);
@@ -671,8 +679,11 @@ TEST(Imitation, trackingTermsFallAsTheFigureDriftsFromTheReference) {
     CHECK(onReference[kTermEndEffectorMatch] > Real(0.7));
 
     // A zero action commands the rest pose, so the figure abandons the squat.
+    // 36 control steps at 60 Hz is 0.6 s, half of the 1.2 s clip, which is the
+    // bottom of the squat and the furthest the reference ever gets from rest.
     const std::vector<Real> zeros(Env2D::actionDim(), Real(0));
-    for (int i = 0; i < 40; ++i) env.step(zeros.data(), Env2D::actionDim());
+    for (int i = 0; i < 36; ++i) env.step(zeros.data(), Env2D::actionDim());
+    CHECK_NEAR(env.phase(), 0.5, 1e-3);
 
     std::vector<Real> drifted(Env2D::rewardTermCount());
     env.writeRewardTerms(drifted.data());

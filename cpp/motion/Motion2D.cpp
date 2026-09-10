@@ -95,22 +95,50 @@ namespace {
 
 // Finite-difference tangent at keyframe `i`, expressed per unit time so that
 // uneven keyframe spacing does not change the shape of the curve.
+//
+// The loop case is the subtle one. A looping clip is authored with the last
+// keyframe repeating the first, so index 0 and index n-1 are not two events one
+// period apart - they are the *same* event written twice. The keyframe before
+// the loop point is therefore n-2, and the one after it is 1.
+//
+// Reading index 0's previous neighbour as index n-1 (the duplicate of itself)
+// instead of n-2 gives a one-sided difference dressed up as a central one, and
+// gives index n-1 the mirror image of it. The two ends of the same instant then
+// disagree in sign: the shipped arm_raise clip came down at 3.71 rad/s and left
+// going up at 3.71 rad/s with nothing in between. Both the reward and the
+// observation read it from here, so they agreed with each other perfectly and
+// no consistency check could have caught it.
 template <typename Get>
 Real tangent(const std::vector<MotionKeyframe>& frames, int i, bool loop, Get get) {
     const int n = static_cast<int>(frames.size());
     if (n < 2) return 0;
+    const Real period = frames.back().time - frames.front().time;
 
     int previous = i - 1;
     int next = i + 1;
-    if (previous < 0) previous = loop ? n - 1 : 0;
-    if (next >= n) next = loop ? 0 : n - 1;
-    if (previous == next) return 0;
-
-    Real span = frames[static_cast<size_t>(next)].time - frames[static_cast<size_t>(previous)].time;
-    if (loop && span <= Real(0)) {
-        // Wrapped across the loop point; the interval is one period long.
-        span += frames.back().time - frames.front().time;
+    // Time offsets carried by a neighbour that lives in the adjacent period.
+    Real shiftPrevious = 0;
+    Real shiftNext = 0;
+    if (previous < 0) {
+        if (!loop) {
+            previous = 0;
+        } else {
+            previous = n - 2;  // the last distinct keyframe, one period back
+            shiftPrevious = -period;
+        }
     }
+    if (next >= n) {
+        if (!loop) {
+            next = n - 1;
+        } else {
+            next = 1;  // the first distinct keyframe, one period on
+            shiftNext = period;
+        }
+    }
+    if (previous == next && shiftPrevious == shiftNext) return 0;
+
+    const Real span = (frames[static_cast<size_t>(next)].time + shiftNext) -
+                      (frames[static_cast<size_t>(previous)].time + shiftPrevious);
     if (std::abs(span) < Real(1e-9)) return 0;
     return (get(frames[static_cast<size_t>(next)]) - get(frames[static_cast<size_t>(previous)])) /
            span;

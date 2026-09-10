@@ -158,6 +158,7 @@ def evaluate(model: Path, magnitude: float, args: argparse.Namespace,
     rotations: list[float] = []
     completed = 0
     peak_spin = 0.0
+    biggest_step = 0.0
 
     try:
         client = EnvClient("127.0.0.1", port, timeout=5.0)
@@ -221,21 +222,38 @@ def evaluate(model: Path, magnitude: float, args: argparse.Namespace,
             previous_spin = spin.copy()
             peak_spin = max(peak_spin, float(np.abs(spin).max()))
 
-            peak_height = np.maximum(peak_height, raw_obs[:, OBS_PELVIS_HEIGHT])
-            contacts = raw_obs[:, OBS_FOOT_CONTACTS:OBS_FOOT_CONTACTS + 2]
-            airborne_steps += (contacts.max(axis=1) < 0.5).astype(np.int64)
-
             finished = info["final_mask"]
             final = info["final_observation"]
 
+            # The state this step actually ended in. For an environment that
+            # finished, the live observation has already been replaced by the
+            # next episode's reset, so reading height and contacts from it
+            # measures a figure standing at rest instead of one in mid-air.
+            # Height survives that (a reset pose is shorter than a flip apex,
+            # and this is a running maximum) but the contact flags do not: the
+            # reset pose has both feet down, so the last airborne step of every
+            # episode was being counted as grounded.
+            ended_in = raw_obs.copy()
+            if finished.any() and final.size:
+                ended_in[finished] = final
+
+            peak_height = np.maximum(peak_height, ended_in[:, OBS_PELVIS_HEIGHT])
+            contacts = ended_in[:, OBS_FOOT_CONTACTS:OBS_FOOT_CONTACTS + 2]
+            airborne_steps += (contacts.max(axis=1) < 0.5).astype(np.int64)
+
             # Advance every environment to where it actually ended up: the final
             # observation for the ones that finished, the live one for the rest.
-            current = np.arctan2(raw_obs[:, OBS_ORIENTATION_SIN], raw_obs[:, OBS_ORIENTATION_COS])
-            if finished.any() and final.size:
-                ended = np.arctan2(final[:, OBS_ORIENTATION_SIN], final[:, OBS_ORIENTATION_COS])
-                current = current.copy()
-                current[finished] = ended
-            total += np.arctan2(np.sin(current - previous), np.cos(current - previous))
+            current = np.arctan2(ended_in[:, OBS_ORIENTATION_SIN],
+                                 ended_in[:, OBS_ORIENTATION_COS])
+            # Orientation travels as sin and cos, so a step's rotation can only
+            # be recovered up to a multiple of 2*pi and the shortest arc is
+            # assumed. That assumption is sound while the figure turns less
+            # than pi in one control step and silently loses a whole turn if it
+            # ever does not, so the largest step is carried out as a witness
+            # rather than trusted.
+            delta = np.arctan2(np.sin(current - previous), np.cos(current - previous))
+            biggest_step = max(biggest_step, float(np.abs(delta).max()))
+            total += delta
             previous = current
 
             for episode in info["episodes"]:
@@ -270,7 +288,8 @@ def evaluate(model: Path, magnitude: float, args: argparse.Namespace,
     if not rotations:
         return {"magnitude": magnitude, "episodes": 0, "completed": float("nan"),
                 "mean_rotation": float("nan"), "peak_spin": peak_spin, "kick": kick,
-                "peak_height": float("nan"), "airborne": float("nan")}
+                "peak_height": float("nan"), "airborne": float("nan"),
+                "biggest_step": biggest_step}
 
     # Control steps to seconds; the simulator runs control at 60 Hz.
     return {
@@ -280,6 +299,7 @@ def evaluate(model: Path, magnitude: float, args: argparse.Namespace,
         "mean_rotation": float(np.mean(rotations)),
         "peak_spin": peak_spin,
         "kick": kick,
+        "biggest_step": biggest_step,
         "peak_height": float(np.mean(peaks)),
         "airborne": float(np.mean(airborne)) / 60.0,
     }
@@ -323,6 +343,19 @@ def report(label: str, rows: list[dict], args: argparse.Namespace) -> None:
     if len(spins) > 1 and max(spins) - min(spins) < 0.05 * max(max(spins), 1e-6):
         print("\n  WARNING: peak spin is flat across the sweep. The impulse is not reaching")
         print("  the figure, so these rows do not measure disturbance robustness.")
+
+    # Rotation is integrated from an orientation that travels as sin and cos,
+    # so each step's turn is only recoverable up to a multiple of 2*pi and the
+    # shortest arc is taken. Past pi in one control step that assumption drops
+    # a whole revolution and the rotation column reads *low* while looking
+    # entirely normal, which is the worst way for a headline number to fail.
+    biggest = max((row["biggest_step"] for row in rows), default=0.0)
+    margin = np.pi / biggest if biggest > 0 else float("inf")
+    print(f"\n  largest single-step rotation {biggest:.3f} rad, "
+          f"{margin:.0f}x under the {np.pi:.3f} rad the wrapped integral allows")
+    if margin < 3.0:
+        print("  WARNING: that is close enough that the rotation column may be dropping")
+        print("  whole turns. Raise the control rate or integrate angular velocity instead.")
     print()
 
 

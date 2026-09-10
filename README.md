@@ -78,7 +78,7 @@ committed alongside it. Nothing is claimed from watching the screen.
 | **Backflip, trained against shoves** | 44% at 400 N.s against 12% untrained, costing 6 points at zero disturbance (96 episodes) | `flight_test.py` |
 | **Backflip, gentler pose falloff** | 0.340 rad mean joint error against 0.475, flip unchanged at 100% and +356 deg | `track_test.py` |
 | **Forward roll** | -360 deg, 24/24 episodes complete | `flight_test.py` |
-| **Jump** | peak height 1.27x rest, 0.43 s with both feet clear of the ground | `flight_test.py` |
+| **Jump** | peak height 1.27x rest, 0.44 s with both feet clear of the ground | `flight_test.py` |
 | **Standing** | 39 to 40 of 40 episodes reach the 1000-step limit across three seeds, surviving returns within 0.4% | `test.py` |
 | **Push recovery** | absorbs thirteen 115 N.s shoves per episode, falls at 145 | `push_test.py` |
 

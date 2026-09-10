@@ -1316,3 +1316,116 @@ looking at the picture.
 - Throughput is about 5,400 env-steps/s at 32 environments, against roughly
   45,000 for the 2D figure at 64. Some of that is the smaller batch and the rest
   is 13 bodies of 3D solver work; it has not been profiled.
+
+
+---
+
+## M9 and M10, built and then cut
+
+The 3D engine was built, tested and trained, and then removed from the project.
+This section records what it reached and why it was cut, because the decision is
+more useful than the code was.
+
+### What worked
+
+Rigid bodies with real inertia tensors, capsule collision with skew segments and
+a two-direction friction basis, ball joints with separate cone and twist limits,
+hinges with the two-axis angular lock that 2D gets for free, a 13-link humanoid
+with 24 actions, a 204-value observation, and a capsule renderer. 82 tests.
+
+The same PPO code trained it to stand: 38 of 40 episodes reached the 1000-step
+limit, pelvis at 0.989 of its rest height, confirmed by rendering it.
+
+Python needed **no change at all**. The observation went from 111 values to 204
+and the action from 12 to 24, and the SPEC handshake carried it, because the
+client had always read its dimensions off the wire instead of hardcoding them.
+That was a design decision from M3 and this was the first time it was tested.
+
+### What did not
+
+The 3D backflip trained to episodes of 26 control steps out of the 79 the clip
+needs, and stopped improving. The diagnostic was clear rather than mysterious:
+the PD preview showed knees off by 0.878 rad and shoulders by 0.674 while
+tracking the reference, so the motors could not follow the tuck and the policy
+was chasing a shape it could not reach.
+
+That was fixable. It was not fixable quickly, and a second engine that stands but
+does not tumble is worth less in a portfolio than one engine whose acrobatics are
+finished and measured. So the 3D work was cut and the project returned to 2D.
+
+### Four findings worth keeping
+
+**Sampling omega once a step makes a tumbling body gain energy.** A tumbling body
+has no constant angular velocity even torque-free, because the inertia tensor
+turns underneath omega. Energy gain on a capsule spun about a non-principal axis:
+
+| hz | seconds | first-order | exact rotation | midpoint |
+|---|---|---|---|---|
+| 240 | 1 | +25.73% | +25.74% | +0.0136% |
+| 240 | 5 | **+2017%** | +2041% | +0.0650% |
+
+Angular momentum is conserved to machine precision in every column, so the usual
+momentum check passes the broken version without complaint. The obvious suspect,
+the quaternion update, was wrong: an exact exponential map moved the drift by
+less than 0.02 points. The error is in *when* omega is sampled.
+
+**A test that asserted the bug.** The half-space normal must run from the capsule
+into the ground, because the solver pushes body A along -normal. The code used
+`plane.normal` and the test written beside it asserted +1, so the test passed
+while a dropped capsule fell to y = -599 over four seconds with every contact
+test green. Second time in this project a test encoded the bug instead of
+catching it, after the M8b disturbance sweep.
+
+**One datagram has a ceiling, and 3D found it.** 64 environments of the 3D figure
+needs 109,568 bytes for one STATE packet against a 60,000 byte budget. The 2D
+figure at 32 environments used about 26 KB, which made the limit feel far away.
+The worst case is every environment finishing on the same step, which with
+synchronised resets is not hypothetical.
+
+**A diagnostic can be wrong in a way that looks exactly like a finding.** The
+first 3D standing policy evaluated at "mean pelvis height 0.607 of rest height",
+just above the 0.55 termination threshold, which reads precisely like the reward
+hacking found three times earlier here. It was about to be written up that way.
+Nothing was wrong: the reward and termination both used the pelvis's own rest
+height and were correct, and only the observation divided by the *whole body*
+height, so an upright figure read 0.607. Rendering the frames settled it in
+seconds.
+
+### And a fourth instance of the dead-term bug, worse than the others
+
+The 3D squat completed its clip 32 times out of 32 with three of the five
+tracking terms reading 0.001, 0.002 and 0.007. Inverting `exp(-k*E)` gave 0.536
+rad of joint error, 7.2 rad/s of velocity error and 0.288 m of end-effector
+error, all far enough out that the exponential is flat.
+
+The three previous instances were terms dead *at convergence*. These were dead
+*at initialization*, which is worse: a term dead at convergence has at least done
+its job on the way up, but one flat at the start can never produce the gradient
+that would rescue it. The policy optimised root and centre of mass, ignored pose
+entirely, and reported perfect completion.
+
+Retuning made the terms readable and did **not** improve the tracking, which is
+the part worth recording:
+
+| term | before rms | after rms | change |
+|---|---|---|---|
+| pose | 0.536 | 0.499 | -6.9% |
+| joint_velocity | 7.196 | 12.816 | +78.1% |
+| end_effector | 0.288 | 0.319 | +11.1% |
+
+The return rose from +234 to +343 almost entirely because the terms read higher
+on a new scale. Rendering showed the policy bobbing 8 cm where the reference
+squats 21 cm.
+
+### One thing that was believed and was wrong
+
+The PD preview was introduced as a cheap check with the claim that a clip the
+preview cannot follow is a clip no policy will follow. That is false for anything
+requiring balance. The squat preview reached 0.40 m against a 0.79 m reference,
+which reads as total failure, while every joint tracked within 0.12 rad. The
+figure held the correct shape the whole way down and toppled over its feet.
+
+The preview is open loop at the root. The pelvis is a free body, nothing in a
+clip controls its orientation, and holding fixed joint angles on an inverted
+pendulum means any lean grows. So the preview tests joint trackability and
+nothing else, and balance is exactly the part a policy supplies.

@@ -14,9 +14,9 @@ and a hand-written rigid-body solver does the rest.
 | forward roll, -360 deg | vertical jump | recovering from a 135 N.s shove | hit with 300 N.s at the apex |
 
 ```
-18,500 lines of C++      2D and 3D rigid-body physics, constraint solvers, humanoids, renderers
+12,100 lines of C++      rigid-body physics, constraint solver, humanoid, OpenGL renderer
  3,500 lines of Python   PPO, GAE, policy, normalisation, evaluation harnesses
-   371 tests             294 C++, 77 Python, all green
+   289 tests             212 C++, 77 Python, all green
      2 dependencies      GLFW for the window, PyTorch for autograd. Nothing else is vendored.
 ```
 
@@ -76,24 +76,6 @@ tanh mean and a state-independent, clamped log-std.
 Imitation is DeepMimic-style: exponential tracking rewards on pose, joint velocity, end-effector
 position, root and centre of mass, with Reference State Initialization and early termination.
 
-### The 3D engine
-
-The same structure again in three dimensions, and the parts that are genuinely different rather
-than the 2D code with a `z` added: real inertia tensors that rotate with the body, ball joints
-with separate cone and twist limits, hinges that must actively forbid the two axes they do not
-turn about, and a capsule renderer.
-
-The orientation integrator is the piece worth naming. A tumbling body has no constant angular
-velocity even with no torque on it, because the inertia tensor turns underneath omega, so
-sampling omega once per step is first order however exactly the rotation is then applied. At this
-engine's rate that costs a tumbling body **+2017% of its kinetic energy over five seconds**.
-Angular momentum is conserved to machine precision the whole time, so the usual check passes the
-broken version without complaint.
-
-`EnvBatch` and `EnvServer` are templates over the environment rather than copies, and Python
-needed no change at all to drive the 3D figure: the observation went from 111 values to 204 and
-the action from 12 to 24, and the handshake carried it.
-
 ### The bridge
 
 One UDP datagram carries all 64 environments per control step, with explicit little-endian
@@ -116,9 +98,8 @@ simulating the step twice.
 ```
 
 Design rationale is in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), the wire format in
-[`docs/PROTOCOL.md`](docs/PROTOCOL.md), and the observation layouts in
-[`docs/OBSERVATIONS.md`](docs/OBSERVATIONS.md) and
-[`docs/OBSERVATIONS3D.md`](docs/OBSERVATIONS3D.md).
+[`docs/PROTOCOL.md`](docs/PROTOCOL.md), the observation layout in
+[`docs/OBSERVATIONS.md`](docs/OBSERVATIONS.md).
 
 ---
 
@@ -258,14 +239,11 @@ scripts/        build, test, train, evaluate, demo
 
 ## What is not done
 
-- **The 3D figure stands but does not yet tumble.** The 3D engine is built and tested:
-  quaternion orientation, real inertia tensors, ball joints with separate cone and twist limits,
-  hinges with a two-axis angular lock, and a capsule renderer. The same PPO code trains it to
-  stand. Acrobatic imitation in 3D is written and running but is not producing a flip yet, and
-  the current numbers are in `docs/PROGRESS.md` rather than in this table.
-- **The cartwheel exists as a reference clip, not as a learned behaviour.** It is the motion this
-  whole exercise was pointed at, since a sagittal 2D figure has no frontal plane and cannot
-  represent one at all. The clip is authored and renders correctly. No policy performs it yet.
+- **This is sagittal-plane 2D.** A cartwheel is a frontal-plane motion and cannot be represented
+  in this figure at all, so it is not a hard case here, it is an impossible one. A 3D engine was
+  built and trained to stand, then removed: the acrobatics did not land in the time available and
+  a half-finished second engine was worth less than a finished first one. That work and why it
+  was cut is in `docs/PROGRESS.md`, and it is in the git history.
 - **Tracking is loose on the acrobatic motions.** `pose_match` runs 0.08 to 0.20 for the jump,
   roll and backflip against 0.86 for an arm raise. The policies match the root trajectory and
   improvise the limbs. Whether that needs more training, gentler falloffs or a more physically

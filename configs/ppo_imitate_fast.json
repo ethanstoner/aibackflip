@@ -56,5 +56,6 @@
 
   "log_dir": "runs",
   "checkpoint_dir": "checkpoints",
-  "save_every_updates": 50
+  "save_every_updates": 50,
+  "snapshot_every_updates": 120
 }

@@ -57,6 +57,14 @@ class TrainConfig:
     log_dir: str = "runs"
     checkpoint_dir: str = "checkpoints"
     save_every_updates: int = 50
+    # Numbered snapshots kept alongside `_best` and `_latest`, so the run leaves
+    # behind a record of how the behaviour developed rather than only where it
+    # ended up. Zero disables them.
+    #
+    # Worth having: `_best` is overwritten every time the return improves, so by
+    # the end of a run every trace of the early policy is gone, and "how did it
+    # learn" becomes unanswerable without training again.
+    snapshot_every_updates: int = 0
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
     @staticmethod
@@ -345,6 +353,12 @@ def main() -> int:
                 save_checkpoint(
                     checkpoint_dir / f"{config.name}_latest.pt", policy, obs_normalizer, meta,
                     ppo.optimizer,
+                )
+            if (config.snapshot_every_updates > 0
+                    and update % config.snapshot_every_updates == 0):
+                save_checkpoint(
+                    checkpoint_dir / f"{config.name}_snap{update:06d}.pt", policy, obs_normalizer,
+                    meta, ppo.optimizer,
                 )
 
     except KeyboardInterrupt:
